@@ -25,18 +25,6 @@ bool enemyHitsObstacle(uint8_t stage, int16_t centerX, int16_t centerY) {
     return false;
 }
 
-// Проверка столкновения точки с врагом (текст 12x6 пикселей, центрированный)
-bool pointHitsEnemy(int16_t px, int16_t py, int16_t ex, int16_t ey) {
-    // ex, ey - центр врага
-    // Текст и хитбокс: [-ENEMY_HALF_WIDTH..+ENEMY_HALF_WIDTH] по X,
-    //                    [-ENEMY_HALF_HEIGHT..+ENEMY_HALF_HEIGHT] по Y
-    const int16_t dx = shortestDelta(ex, px, ARENA_WIDTH_FIXED);
-    const int16_t dy = shortestDelta(ey, py, ARENA_HEIGHT_FIXED);
-    const int16_t halfWidth = ENEMY_HALF_WIDTH * FIXED_ONE;
-    const int16_t halfHeight = ENEMY_HALF_HEIGHT * FIXED_ONE;
-    return dx >= -halfWidth && dx <= halfWidth && dy >= -halfHeight && dy <= halfHeight;
-}
-
 // Простое движение к игроку с проверкой коллизий и скольжением вдоль стен
 void moveTowardsPlayer(uint8_t stage, Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t speed) {
     const int16_t oldX = enemy.x;
@@ -153,9 +141,7 @@ void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t vari
 
 // Обновление всех врагов
 void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
-                   int16_t playerX, int16_t playerY, uint8_t stage, uint32_t& randomState) {
-    (void)randomState; // Не используется пока
-    
+                   int16_t playerX, int16_t playerY, uint8_t stage) {
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
         Enemy& enemy = enemies[i];
         const EnemyType type = getEnemyType(enemy);
@@ -235,29 +221,6 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
         if (orbs[i].lifetime > 0) {
             --orbs[i].lifetime;
         }
-    }
-}
-
-// Проверка попадания в врага
-int8_t checkEnemyHit(Enemy& enemy, int16_t projectileX, int16_t projectileY) {
-    const EnemyType type = getEnemyType(enemy);
-    if (type == EnemyType::None) {
-        return -1;
-    }
-    
-    if (!pointHitsEnemy(projectileX, projectileY, enemy.x, enemy.y)) {
-        return -1;
-    }
-    
-    // Попадание!
-    const uint8_t hp = getEnemyHp(enemy);
-    if (hp <= 1) {
-        // Смерть: тип НЕ обнуляем здесь — обработчик в combat.cpp читает тип
-        // (например, для деления Splitter) и сам убирает врага.
-        return 1; // Смерть
-    } else {
-        setEnemyHp(enemy, hp - 1);
-        return 0; // Попадание без смерти
     }
 }
 

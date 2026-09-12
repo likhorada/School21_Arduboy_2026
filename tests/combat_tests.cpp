@@ -338,7 +338,7 @@ void testEnemyBoundariesAndSpeed() {
             spawnEnemy(game.combat.enemies[0], type, edges[edge][0], edges[edge][1], 8,
                    game.combat.currentStage);
             updateEnemies(game.combat.enemies, game.combat.scoreOrbs, targets[edge][0], targets[edge][1],
-                          game.combat.currentStage, game.combat.enemyRandomState);
+                          game.combat.currentStage);
             const Enemy& e = game.combat.enemies[0];
             if (edge == 0) assert(e.x > edges[edge][0]);
             if (edge == 1) assert(e.x < edges[edge][0]);
@@ -360,7 +360,7 @@ void testEnemyBoundariesAndSpeed() {
             const int16_t px = frame < 50 || edge < 2 ? edges[edge][0] : 40 * 16;
             const int16_t py = frame < 50 || edge >= 2 ? edges[edge][1] : 30 * 16;
             updateEnemies(game.combat.enemies, game.combat.scoreOrbs, px, py,
-                          game.combat.currentStage, game.combat.enemyRandomState);
+                          game.combat.currentStage);
             for (uint8_t i = 0; i < 2; ++i) {
                 const Enemy& e = game.combat.enemies[i];
                 assert(enemyPositionValid(game.combat.currentStage, e.x, e.y));
@@ -383,8 +383,7 @@ void testEnemyBoundariesAndSpeed() {
             spawnEnemy(e, EnemyType::Fast, 65 * 16, 52 * 16, 0, game.combat.currentStage);
             setEnemyHp(e, hp);
             updateEnemies(game.combat.enemies, game.combat.scoreOrbs, (65 + dx * 20) * 16,
-                          (52 + dy * 10) * 16, game.combat.currentStage,
-                          game.combat.enemyRandomState);
+                          (52 + dy * 10) * 16, game.combat.currentStage);
             const int vx = e.x - 65 * 16, vy = e.y - 52 * 16;
             const int speedSquared = vx * vx + vy * vy;
             assert(speedSquared >= previousSpeedSquared);

@@ -2,6 +2,15 @@
 #include "render.h"
 #include "arena.h"
 #include "stages.h"
+#include "assets/intro.h"
+#include "assets/mainmenu_about.h"
+#include "assets/mainmenu_exit.h"
+#include "assets/mainmenu_play.h"
+#include "assets/mainmenu_sound.h"
+#include "assets/soundmenu_exit.h"
+#include "assets/soundmenu_off.h"
+#include "assets/soundmenu_on.h"
+#include "assets/menu_frames.h"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -12,6 +21,26 @@ int main() {
     Arduboy2 display;
     Game game = {};
     renderGame(display, game);
+    // Арты меню: base + XOR-дельты восстанавливают каждый кадр точно.
+    {
+        const uint8_t *menuExpected[4] = {
+            mainmenu_play_bitmap, mainmenu_about_bitmap, mainmenu_sound_bitmap,
+            mainmenu_exit_bitmap};
+        const uint8_t *soundExpected[3] = {
+            soundmenu_on_bitmap, soundmenu_off_bitmap, soundmenu_exit_bitmap};
+        for (uint8_t i = 0; i < 4; ++i) {
+            game.state = GameState::Menu;
+            game.menu.selectedIndex = i;
+            renderGame(display, game);
+            assert(std::memcmp(display.sBuffer, menuExpected[i], 1024) == 0);
+        }
+        for (uint8_t i = 0; i < 3; ++i) {
+            game.state = GameState::SoundMenu;
+            game.soundMenu.selectedIndex = i;
+            renderGame(display, game);
+            assert(std::memcmp(display.sBuffer, soundExpected[i], 1024) == 0);
+        }
+    }
     startGame(game);
     game.combat.playerScore = 65535;
     const GameState states[] = {GameState::StageCleared, GameState::GameOver, GameState::Win};

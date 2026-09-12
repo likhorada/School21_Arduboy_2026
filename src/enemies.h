@@ -89,10 +89,7 @@ bool enemyOverlapsPlayer(int16_t x, int16_t y, int16_t playerCenterX,
 bool enemyPositionValid(uint8_t stage, int16_t x, int16_t y);
 
 void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
-                   int16_t playerX, int16_t playerY, uint8_t stage,
-                   uint32_t &randomState);
-
-int8_t checkEnemyHit(Enemy &enemy, int16_t projectileX, int16_t projectileY);
+                   int16_t playerX, int16_t playerY, uint8_t stage);
 
 void createScoreOrb(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t x, int16_t y,
                     uint8_t value);

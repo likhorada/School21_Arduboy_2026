@@ -16,14 +16,19 @@ constexpr uint8_t WHITE = 1, BLACK = 0;
 // Host-only drawing spy: checks bounds and text layout, not the hardware font.
 class Arduboy2 {
 public:
+    static constexpr uint16_t bufferSize = 64 * 128 / 8;
     uint8_t pixels[64][128] = {};
     char text[8][22] = {};
     bool occupied[64][128] = {};
+    // Байтовое зеркало sBuffer (как у настоящего Arduboy2): base-кадры
+    // меню и XOR-дельты меняют именно его.
+    uint8_t sBuffer[bufferSize] = {};
     int16_t cursorX = 0, cursorY = 0;
     void clear() {
         std::memset(pixels, 0, sizeof(pixels));
         std::memset(text, 0, sizeof(text));
         std::memset(occupied, 0, sizeof(occupied));
+        std::memset(sBuffer, 0, sizeof(sBuffer));
     }
     void setTextWrap(bool) {}
     void setCursor(int16_t x, int16_t y) { cursorX = x; cursorY = y; }
@@ -52,6 +57,10 @@ public:
             for (uint8_t xx = 0; xx < w; ++xx)
                 if (pgm_read_byte(bitmap + (yy / 8) * w + xx) & (1 << (yy & 7)))
                     drawPixel(x + xx, y + yy, color);
+        // Зеркалим байты кадра в sBuffer на случай XOR-дельт меню.
+        if (x == 0 && y == 0 && color == WHITE)
+            for (uint16_t b = 0; b < uint16_t(w) * h / 8 && b < bufferSize; ++b)
+                sBuffer[b] |= pgm_read_byte(bitmap + b);
     }
     void print(char c) {
         assert(cursorX >= 0 && cursorX + 6 <= 128 && cursorY >= 0 && cursorY + 8 <= 64);

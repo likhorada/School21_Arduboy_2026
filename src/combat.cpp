@@ -47,19 +47,23 @@ int8_t findHit(const Combat &combat, int16_t x, int16_t y, int16_t dx,
   if (shotBlocked(combat.currentStage, x, y, dx, dy)) {
     return WALL_HIT;
   }
-  for (uint8_t i = 0; i < DUMMY_COUNT; ++i) {
-    const Dummy &dummy = combat.dummies[i];
-    if (getHp(dummy) == 0) {
-      continue;
-    }
-    const Obstacle hitbox = {dummy.x, dummy.y, DUMMY_SIZE, DUMMY_SIZE};
-    if (segmentHitsBox(x, y, dx, dy, hitbox)) {
-      return i;
-    }
-  }
+  // Дешёвый отсев до дорогого segmentHitsBox (int32): центр врага должен быть
+  // в пределах полосы вокруг отрезка, иначе попадание невозможно. Отрезок на
+  // шаг не длиннее пикселя, поэтому большинство врагов отсеиваются парой
+  // вычитаний без умножений.
+  const int16_t spanX = (dx < 0 ? -dx : dx) + ENEMY_HALF_WIDTH * FIXED_ONE;
+  const int16_t spanY = (dy < 0 ? -dy : dy) + ENEMY_HALF_HEIGHT * FIXED_ONE;
   for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
     const Enemy &enemy = combat.enemies[i];
     if (getEnemyType(enemy) == EnemyType::None)
+      continue;
+    const int16_t sx =
+        shortestDelta(x, wrapCoordinate(enemy.x, ARENA_WIDTH_FIXED),
+                      ARENA_WIDTH_FIXED);
+    const int16_t sy =
+        shortestDelta(y, wrapCoordinate(enemy.y, ARENA_HEIGHT_FIXED),
+                      ARENA_HEIGHT_FIXED);
+    if (sx > spanX || sx < -spanX || sy > spanY || sy < -spanY)
       continue;
     const Obstacle box = {
         uint8_t(wrapCoordinate(enemy.x / FIXED_ONE - ENEMY_HALF_WIDTH,
@@ -68,7 +72,7 @@ int8_t findHit(const Combat &combat, int16_t x, int16_t y, int16_t dx,
                                ARENA_HEIGHT)),
         2 * ENEMY_HALF_WIDTH, 2 * ENEMY_HALF_HEIGHT};
     if (segmentHitsBox(x, y, dx, dy, box))
-      return DUMMY_COUNT + i;
+      return i;
   }
   return NO_HIT;
 }
@@ -106,8 +110,6 @@ int8_t advanceProjectile(Projectile &projectile, const Combat &combat) {
 void resetCombat(Combat &combat) {
   combat = {};
 
-  // Инициализация новой системы врагов
-  combat.enemyRandomState = 0x12345678u;
   combat.playerScore = 0;
   combat.currentStage = 0;
   combat.currentWave = 0;
@@ -162,7 +164,7 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
     --combat.freezeFrames;
   } else {
     updateEnemies(combat.enemies, combat.scoreOrbs, originX, originY,
-                  combat.currentStage, combat.enemyRandomState);
+                  combat.currentStage);
   }
 
   // Новые враги первый кадр остаются точно на индикаторах.
@@ -178,19 +180,8 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
       continue;
     }
     const int8_t hit = advanceProjectile(projectile, combat);
-    if (hit >= DUMMY_COUNT) {
-      damageEnemy(combat, hit - DUMMY_COUNT, damage);
-    } else if (hit >= 0) {
-      Dummy &dummy = combat.dummies[hit];
-      const uint8_t hp = getHp(dummy);
-      // Проверяем смерть до вычитания: без этого unsigned HP может
-      // переполниться.
-      if (hp <= SHOT_DAMAGE) {
-        setHpAndFlash(dummy, 0, 0);
-        dummy.respawnFrames = DUMMY_RESPAWN_FRAMES;
-      } else {
-        setHpAndFlash(dummy, hp - SHOT_DAMAGE, HIT_FLASH_FRAMES);
-      }
+    if (hit >= 0) {
+      damageEnemy(combat, hit, damage);
     }
   }
 

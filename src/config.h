@@ -32,11 +32,6 @@ constexpr uint8_t SPAWN_DELAY_FRAMES = 30;
 // Пауза: удержание A+B на полсекунды (~0.5s при 62.5 FPS).
 constexpr uint8_t PAUSE_HOLD_FRAMES = 31;
 
-constexpr uint8_t DUMMY_COUNT = 3;
-constexpr uint8_t DUMMY_SIZE = 7;
-constexpr uint8_t DUMMY_MAX_HP = 3;
-constexpr uint8_t DUMMY_RESPAWN_FRAMES = 125; // 2 секунды после смерти.
-constexpr uint8_t HIT_FLASH_FRAMES = 6;
 constexpr uint8_t MAX_PROJECTILES = 4;
 constexpr uint8_t SHOT_INTERVAL = 15; // 0,4 секунды между подходами очереди.
 constexpr uint8_t SHOT_BURST_COUNT =
@@ -66,13 +61,6 @@ static_assert(SHOT_RANGE > 0 && SHOT_RANGE <= ARENA_WIDTH / 2,
               "Aim preview is limited to the short route");
 static_assert(PROJECTILE_LIFETIME >= AIM_PREVIEW_FRAMES && SHOT_DAMAGE > 0,
               "Shots must live long enough to reach a target");
-static_assert(DUMMY_COUNT <= 8, "Target rejection mask has only eight bits");
-static_assert(DUMMY_SIZE <= ARENA_WIDTH / 2 && DUMMY_SIZE <= ARENA_HEIGHT / 2,
-              "Segment collision expects boxes no larger than half the arena");
-// Упаковка не должна молча обрезать HP или длительность вспышки при смене
-// настроек.
-static_assert(DUMMY_MAX_HP > 0 && DUMMY_MAX_HP <= 3, "Packed HP uses two bits");
-static_assert(HIT_FLASH_FRAMES <= 7, "Packed hit flash uses three bits");
 static_assert(SHOT_BURST_COUNT >= 1 && SHOT_BURST_DELAY > 0 &&
                   SHOT_BURST_DELAY < SHOT_INTERVAL,
               "Burst bullets must be quicker than the full reload");

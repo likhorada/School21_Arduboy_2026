@@ -2,10 +2,9 @@
 
 #include "arena.h"
 #include "assets/intro.h"
-#include "assets/mainmenu_about.h"
-#include "assets/mainmenu_exit.h"
-#include "assets/mainmenu_play.h"
 #include "assets/mainmenu_sound.h"
+#include "assets/menu_frames.h"
+#include "assets/soundmenu_off.h"
 #include "stages.h"
 #include <Arduboy2.h>
 
@@ -47,6 +46,23 @@ static_assert(sizeof(playerBitmap) == PLAYER_SIZE && PLAYER_SIZE == 7,
 void drawArenaPixel(Arduboy2 &arduboy, int16_t x, int16_t y, uint8_t color) {
   arduboy.drawPixel(wrapCoordinate(x, ARENA_WIDTH),
                     HUD_HEIGHT + wrapCoordinate(y, ARENA_HEIGHT), color);
+}
+
+// Применяем XOR-дельту кадра к буферу поверх уже отрисованного base.
+// Дельты во flash: runs [off_lo, off_hi, len, payload...], конец 0xFF 0xFF.
+void applyScreenDelta(uint8_t *buf, const uint8_t *delta) {
+  uint16_t offset =
+      pgm_read_byte(delta) | (uint16_t(pgm_read_byte(delta + 1)) << 8);
+  delta += 2;
+  while (offset != 0xFFFF) {
+    const uint8_t length = pgm_read_byte(delta++);
+    for (uint8_t k = 0; k < length; ++k) {
+      buf[offset + k] ^= pgm_read_byte(delta + k);
+    }
+    delta += length;
+    offset = pgm_read_byte(delta) | (uint16_t(pgm_read_byte(delta + 1)) << 8);
+    delta += 2;
+  }
 }
 
 // Переносим пиксели через края по отдельности, не затрагивая HUD.
@@ -452,24 +468,42 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   }
 
   if (game.state == GameState::Menu) {
-    const uint8_t *frames[] = {
-        mainmenu_play_bitmap,
-        mainmenu_about_bitmap,
-        mainmenu_sound_bitmap,
-        mainmenu_exit_bitmap,
-    };
-    arduboy.drawBitmap(0, 0, frames[game.menu.selectedIndex], 128, 64, WHITE);
+    // База кадра — mainmenu_sound, остальные кадры — XOR-дельты поверх неё.
+    arduboy.drawBitmap(0, 0, mainmenu_sound_bitmap, 128, 64, WHITE);
+    const uint8_t *delta = nullptr;
+    switch (game.menu.selectedIndex) {
+    case 0:
+      delta = menu_delta_play;
+      break;
+    case 1:
+      delta = menu_delta_about;
+      break;
+    case 3:
+      delta = menu_delta_main_exit;
+      break;
+    default:
+      break; // Sound — сама база
+    }
+    if (delta)
+      applyScreenDelta(arduboy.sBuffer, delta);
     return;
   }
 
   if (game.state == GameState::SoundMenu) {
-    arduboy.setCursor(46, 0);
-    arduboy.print(F("SOUND"));
-    for (uint8_t i = 0; i < 3; ++i) {
-      arduboy.setCursor(37, 16 + i * 16);
-      arduboy.print(game.soundMenu.selectedIndex == i ? F("> ") : F("  "));
-      arduboy.print(i == 0 ? F("ON") : (i == 1 ? F("OFF") : F("BACK")));
+    arduboy.drawBitmap(0, 0, soundmenu_off_bitmap, 128, 64, WHITE);
+    const uint8_t *delta = nullptr;
+    switch (game.soundMenu.selectedIndex) {
+    case 0:
+      delta = menu_delta_soundmenu_on;
+      break;
+    case 2:
+      delta = menu_delta_soundmenu_exit;
+      break;
+    default:
+      break; // Off — сама база
     }
+    if (delta)
+      applyScreenDelta(arduboy.sBuffer, delta);
     return;
   }
 
