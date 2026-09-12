@@ -8,7 +8,7 @@ namespace {
 
 using namespace gc;
 
-const InputFrame idle = {0, 0, false, false};
+const InputFrame idle = {0, 0, false, false, false, false};
 
 int16_t normalized(int value, int extent) {
     return static_cast<int16_t>((value % extent + extent) % extent);
@@ -100,7 +100,7 @@ void testTitleAndReset() {
         const InputFrame movement = {
             static_cast<int8_t>(static_cast<int>(frame % 3) - 1),
             static_cast<int8_t>(static_cast<int>((frame / 3) % 3) - 1),
-            false, false
+            false, false, false, false
         };
         updateGame(game, movement);
         assert(game.state == GameState::Title);
@@ -108,7 +108,7 @@ void testTitleAndReset() {
     }
     for (unsigned buttons = 1; buttons <= 3; ++buttons) {
         game = title;
-        const InputFrame start = {1, -1, (buttons & 1) != 0, (buttons & 2) != 0};
+        const InputFrame start = {1, -1, (buttons & 1) != 0, (buttons & 2) != 0, false, false};
         updateGame(game, start);
         assertFreshRun(game); // Кадр старта не запускает движение или Dash.
         updateGame(game, idle);
@@ -127,7 +127,7 @@ void testWalking() {
         for (int8_t dy = -1; dy <= 1; ++dy) {
             Game game = playingAt(60 * FIXED_ONE + 3, 25 * FIXED_ONE + 7);
             const Player initial = game.player;
-            const InputFrame input = {dx, dy, false, false};
+            const InputFrame input = {dx, dy, false, false, false, false};
             const int speed = dx != 0 && dy != 0 ? 11 : 16;
             for (int frame = 1; frame <= 8; ++frame) {
                 updateGame(game, input);
@@ -172,7 +172,7 @@ void testWraps() {
                     const int16_t y = dy < 0 ? offset - 1 :
                         (dy > 0 ? ARENA_HEIGHT_FIXED - offset : 45 * FIXED_ONE + 7);
                     Game game = playingAt(x, y);
-                    const InputFrame input = {dx, dy, dash != 0, false};
+                    const InputFrame input = {dx, dy, dash != 0, false, false, false};
                     updateGame(game, input);
                     assert(game.player.x == normalized(x + dx * speed, ARENA_WIDTH_FIXED));
                     assert(game.player.y == normalized(y + dy * speed, ARENA_HEIGHT_FIXED));
@@ -272,7 +272,7 @@ void testSlidingAndDashCollision() {
             Game game = playingAt(x, y);
             const InputFrame dash = {
                 static_cast<int8_t>(horizontal ? direction : 0),
-                static_cast<int8_t>(horizontal ? 0 : direction), true, false
+                static_cast<int8_t>(horizontal ? 0 : direction), true, false, false, false
             };
             updateGame(game, dash);
             // Первый подшаг свободен, следующий зайдёт в стену на 13/16 пикселя.
@@ -291,7 +291,7 @@ void testSlidingAndDashCollision() {
             const int16_t faceY = horizontal ? y : normalized(boundary, extent);
             const InputFrame diagonal = {
                 static_cast<int8_t>(horizontal ? direction : 1),
-                static_cast<int8_t>(horizontal ? 1 : direction), false, false
+                static_cast<int8_t>(horizontal ? 1 : direction), false, false, false, false
             };
             game = playingAt(faceX, faceY);
             updateGame(game, diagonal);
@@ -336,7 +336,7 @@ void testDashMotion() {
             for (int tick = 1; tick <= 6; ++tick) {
                 const InputFrame input = {
                     static_cast<int8_t>(tick == 1 ? dx : -dx),
-                    static_cast<int8_t>(tick == 1 ? dy : -dy), tick == 1, false
+                    static_cast<int8_t>(tick == 1 ? dy : -dy), tick == 1, false, false, false
                 };
                 updateGame(game, input);
                 assert(game.player.x == initial.x + tick * dx * speed);
@@ -353,7 +353,7 @@ void testDashMotion() {
             updateGame(game, idle);
             assert(game.player.x == end.x && game.player.y == end.y);
             const InputFrame reverse = {
-                static_cast<int8_t>(-dx), static_cast<int8_t>(-dy), false, false
+                static_cast<int8_t>(-dx), static_cast<int8_t>(-dy), false, false, false, false
             };
             updateGame(game, reverse);
             const int walkSpeed = dx != 0 && dy != 0 ? 11 : 16;
@@ -363,10 +363,10 @@ void testDashMotion() {
         }
     }
     Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
-    const InputFrame faceLeft = {-1, 0, false, false};
+    const InputFrame faceLeft = {-1, 0, false, false, false, false};
     updateGame(game, faceLeft);
     const int16_t x = game.player.x;
-    const InputFrame stationaryDash = {0, 0, true, false};
+    const InputFrame stationaryDash = {0, 0, true, false, false, false};
     for (int tick = 1; tick <= 6; ++tick) {
         updateGame(game, tick == 1 ? stationaryDash : idle);
         assert(game.player.x == x - tick * DASH_SPEED);
@@ -382,8 +382,8 @@ void testSlotsAndInputEdges() {
         Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
         game.player.slots[slot] = {AbilityId::Dash, 0};
         game.player.slots[other] = {AbilityId::None, 19};
-        const InputFrame press = {1, 0, slot == 0, slot == 1};
-        const InputFrame pressIdle = {0, 0, slot == 0, slot == 1};
+const InputFrame press = {1, 0, slot == 0, slot == 1, false, false};
+const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
         updateGame(game, press);
         assert(game.player.x == 60 * FIXED_ONE + DASH_SPEED);
         assert(game.player.slots[slot].cooldown == DASH_COOLDOWN);
@@ -417,7 +417,7 @@ void testSlotsAndInputEdges() {
         game.player.slots[0].ability = AbilityId::Dash;
         game.player.slots[1].ability = AbilityId::Dash;
         updateGame(game, press);
-        const InputFrame otherPress = {0, 0, other == 0, other == 1};
+        const InputFrame otherPress = {0, 0, other == 0, other == 1, false, false};
         updateGame(game, otherPress);
         assert(game.player.dashFrames == 4);
         assert(game.player.slots[other].cooldown == 0);
@@ -438,7 +438,7 @@ void testSlotsAndInputEdges() {
         game.player.slots[0].ability = AbilityId::None;
         game.player.slots[1].ability = AbilityId::None;
         const Player unequipped = game.player;
-        const InputFrame both = {0, 0, true, true};
+        const InputFrame both = {0, 0, true, true, false, false};
         for (unsigned frame = 0; frame < 2 * DASH_COOLDOWN; ++frame) {
             updateGame(game, both);
             assert(game.player.x == unequipped.x && game.player.y == unequipped.y);
@@ -451,12 +451,12 @@ void testSlotsAndInputEdges() {
     Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
     game.player.slots[0].ability = AbilityId::None;
     for (unsigned buttons = 1; buttons <= 3; ++buttons) {
-        const InputFrame input = {0, 0, (buttons & 1) != 0, (buttons & 2) != 0};
+        const InputFrame input = {0, 0, (buttons & 1) != 0, (buttons & 2) != 0, false, false};
         const Player before = game.player;
         updateGame(game, input);
         assertSamePlayer(game.player, before);
     }
-    const InputFrame walkBoth = {1, 0, true, true};
+    const InputFrame walkBoth = {1, 0, true, true, false, false};
     updateGame(game, walkBoth);
     assert(game.player.x == 61 * FIXED_ONE);
     assert(game.player.dashFrames == 0);
@@ -556,7 +556,7 @@ void testRandomizedInput() {
             updateGame(game, input);
             // Новое состояние: после прохождения стейджа игра ждёт нажатия A/B.
             if (game.state == GameState::StageCleared) {
-                const InputFrame continuePressed = {0, 0, true, false};
+                const InputFrame continuePressed = {0, 0, true, false, false, false};
                 updateGame(game, continuePressed);
             }
             assert(game.state == GameState::Playing);
@@ -579,6 +579,72 @@ void testRandomizedInput() {
                 movedTicks, dashTicks);
 }
 
+// Пауза: вход и выход по симметричному удержанию A+B на полсекунды.
+void testPause() {
+    const InputFrame hold = {0, 0, false, false, true, true};
+    const InputFrame moveOnly = {1, 0, false, false, false, false};
+
+    Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
+    for (unsigned frame = 0; frame < PAUSE_HOLD_FRAMES; ++frame) {
+        updateGame(game, hold);
+        if (frame + 1 < PAUSE_HOLD_FRAMES) {
+            assert(game.state == GameState::Playing);
+        }
+    }
+    assert(game.state == GameState::Paused);
+
+    // Во время паузы мир заморожен: ходьба, таймеры, кулдауны и враги.
+    const Player frozen = game.player;
+    game.player.slots[1].cooldown = 5;
+    game.player.iframes = IFRAME_DURATION;
+    game.combat.stageTimer = 321;
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 40 * FIXED_ONE,
+               30 * FIXED_ONE, 0, game.combat.currentStage);
+    const Enemy frozenEnemy = game.combat.enemies[0];
+    for (unsigned frame = 0; frame < 2 * PAUSE_HOLD_FRAMES; ++frame) {
+        updateGame(game, moveOnly);
+        assert(game.state == GameState::Paused);
+        assert(game.player.x == frozen.x && game.player.y == frozen.y);
+        assert(game.player.slots[1].cooldown == 5);
+        assert(game.player.iframes == IFRAME_DURATION);
+        assert(game.combat.stageTimer == 321);
+        assert(game.combat.enemies[0].x == frozenEnemy.x);
+        assert(game.combat.enemies[0].y == frozenEnemy.y);
+        assert(getEnemyType(game.combat.enemies[0]) ==
+               getEnemyType(frozenEnemy));
+    }
+
+    // Простое отпускание кнопок паузу не снимает.
+    for (unsigned frame = 0; frame < PAUSE_HOLD_FRAMES; ++frame) {
+        updateGame(game, idle);
+        assert(game.state == GameState::Paused);
+    }
+
+    // Повторное удержание A+B полсекунды снимает паузу.
+    for (unsigned frame = 0; frame < PAUSE_HOLD_FRAMES; ++frame) {
+        updateGame(game, hold);
+    }
+    assert(game.state == GameState::Playing);
+    assert(game.player.x == frozen.x && game.player.y == frozen.y);
+    assert(game.player.slots[1].cooldown == 5);
+    assert(game.combat.stageTimer == 321);
+
+    // Ещё один полный цикл пауза-рестарт работает и обнуляет счётчик.
+    for (unsigned frame = 0; frame < PAUSE_HOLD_FRAMES; ++frame) {
+        updateGame(game, hold);
+    }
+    assert(game.state == GameState::Paused);
+    updateGame(game, idle);
+    assert(game.state == GameState::Paused);
+    updateGame(game, hold);
+    for (unsigned frame = 0; frame + 2 < PAUSE_HOLD_FRAMES; ++frame) {
+        updateGame(game, hold);
+        assert(game.state == GameState::Paused);
+    }
+    updateGame(game, hold);
+    assert(game.state == GameState::Playing);
+}
+
 } // Конец анонимного пространства имён.
 
 int main() {
@@ -592,5 +658,6 @@ int main() {
     testSlotsAndInputEdges();
     testMapConnectivity();
     testRandomizedInput();
+    testPause();
     std::puts("All gameplay tests passed.");
 }

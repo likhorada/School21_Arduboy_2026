@@ -5,7 +5,7 @@
 
 namespace gc {
 
-enum class GameState : uint8_t { Title, Playing, Shop, StageCleared, GameOver, Win };
+enum class GameState : uint8_t { Title, Playing, Paused, Shop, StageCleared, GameOver, Win };
 enum class AbilityId : uint8_t { None, Dash, MarkAndSweep, StopTheWorld, Compact };
 inline uint8_t abilityCooldown(AbilityId id) {
     return id == AbilityId::None ? 0 : (id == AbilityId::MarkAndSweep ? 180 :
@@ -94,6 +94,7 @@ struct Game {
     PlayerPassives passives;
     Combat combat;
     ShopState shop;
+    uint8_t pauseHoldFrames;  // Счётчик удержания A+B для паузы
 };
 
 // Ввод на один кадр
@@ -102,6 +103,8 @@ struct InputFrame {
     int8_t moveY;
     bool activateA;  // Только новое нажатие, не удержание.
     bool activateB;
+    bool holdA;      // Удержание кнопки A
+    bool holdB;      // Удержание кнопки B
 };
 
 // Полный сброс забега: взгляд вправо, Dash в A, слот B пустой.
@@ -121,7 +124,7 @@ void updateGame(Game& game, const InputFrame& input);
 
 #ifdef __AVR__
 static_assert(sizeof(Player) == 13, "Packed player must use 13 AVR bytes");
-static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) + sizeof(ShopState),
+static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) + sizeof(ShopState) + 1,
               "Unexpected AVR game layout");
 #endif
 

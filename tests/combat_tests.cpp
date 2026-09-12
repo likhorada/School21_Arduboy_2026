@@ -7,9 +7,9 @@
 
 namespace {
 using namespace gc;
-const InputFrame idle = {0, 0, false, false};
-const InputFrame pressA = {0, 0, true, false};
-const InputFrame pressB = {0, 0, false, true};
+const InputFrame idle = {0, 0, false, false, false, false};
+const InputFrame pressA = {0, 0, true, false, false, false};
+const InputFrame pressB = {0, 0, false, true, false, false};
 constexpr int16_t HALF_PLAYER = PLAYER_SIZE * FIXED_ONE / 2;
 
 unsigned alive(const Combat& combat) {
@@ -167,7 +167,7 @@ void testShop() {
     game.shop.selectedIndex = 3;
     updateGame(game, pressA);
     assert(game.shop.choosingSlot && game.combat.playerScore == 900);
-    updateGame(game, {-1, 0, false, false});
+    updateGame(game, {-1, 0, false, false, false, false});
     assert(!game.shop.choosingSlot && game.combat.playerScore == 900);
     updateGame(game, pressA);
     updateGame(game, pressB);
@@ -191,7 +191,7 @@ void testShop() {
     updateGame(game, pressA);
     assert(game.passives.moveSpeedLevel == 1 && game.combat.playerScore == 400);
     initShop(game);
-    const InputFrame down = {0, 1, false, false};
+    const InputFrame down = {0, 1, false, false, false, false};
     for (unsigned i = 0; i < 10; ++i) updateGame(game, down);
     assert(game.shop.selectedIndex == 1);
     updateGame(game, idle);
@@ -251,7 +251,7 @@ void testContactAndSpawns() {
                        game.combat.currentStage);
             game.combat.freezeFrames = 200;
             for (unsigned i = 0; i < 15; ++i) {
-                updateGame(game, {int8_t(axis == 0 ? direction : 0), int8_t(axis == 1 ? direction : 0), i == 0, false});
+                updateGame(game, {int8_t(axis == 0 ? direction : 0), int8_t(axis == 1 ? direction : 0), i == 0, false, false, false});
                 assertSeparated(game);
             }
             assert(game.player.hp < 4);
@@ -412,7 +412,7 @@ void testAbilitiesAndCombat() {
 
     game = fixture();
     game.passives.moveSpeedLevel = 3;
-    updateGame(game, {1, 0, false, false});
+    updateGame(game, {1, 0, false, false, false, false});
     assert(game.player.x == x + WALK_SPEED + 6);
     // Damage upgrade affects real moving projectiles, including their last live frame.
     for (uint8_t level = 0; level < 4; ++level) {
@@ -527,8 +527,8 @@ void testLiveCombatStress() {
     unsigned deaths = 0;
     for (unsigned frame = 0; frame < 20000; ++frame) {
         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
-        const InputFrame input = {int8_t(int(rng % 3) - 1), int8_t(int((rng >> 8) % 3) - 1),
-                                  frame % 251 == 0, frame % 137 == 0};
+const InputFrame input = {int8_t(int(rng % 3) - 1), int8_t(int((rng >> 8) % 3) - 1),
+                                   frame % 251 == 0, frame % 137 == 0, false, false};
         if (game.state == GameState::GameOver) ++deaths;
         if (game.state == GameState::Playing) updateGame(game, input);
         else updateGame(game, pressB);

@@ -29,6 +29,9 @@ constexpr uint8_t MAX_MOVE_STEPS = (DASH_SPEED + FIXED_ONE - 1) / FIXED_ONE;
 // Предупреждение перед спавном волны: кадры мигающих квадратов-индикаторов.
 constexpr uint8_t SPAWN_DELAY_FRAMES = 30;
 
+// Пауза: удержание A+B на полсекунды (~0.5s при 62.5 FPS).
+constexpr uint8_t PAUSE_HOLD_FRAMES = 31;
+
 constexpr uint8_t DUMMY_COUNT = 3;
 constexpr uint8_t DUMMY_SIZE = 7;
 constexpr uint8_t DUMMY_MAX_HP = 3;
@@ -36,7 +39,8 @@ constexpr uint8_t DUMMY_RESPAWN_FRAMES = 125; // 2 секунды после с�
 constexpr uint8_t HIT_FLASH_FRAMES = 6;
 constexpr uint8_t MAX_PROJECTILES = 4;
 constexpr uint8_t SHOT_INTERVAL = 15; // 0,4 секунды между подходами очереди.
-constexpr uint8_t SHOT_BURST_COUNT = 2; // Пуль за подход (1 = обычный одиночный).
+constexpr uint8_t SHOT_BURST_COUNT =
+    2; // Пуль за подход (1 = обычный одиночный).
 constexpr uint8_t SHOT_BURST_DELAY = 4; // Пауза между пулями очередью.
 constexpr uint8_t SHOT_DAMAGE = 1;
 constexpr uint8_t SHOT_RANGE = 48; // Пиксели от центра игрока до центра цели.

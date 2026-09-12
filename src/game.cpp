@@ -172,6 +172,13 @@ void updateShop(Game& game, const InputFrame& input) {
 }
 
 void updateGame(Game& game, const InputFrame& input) {
+    // Удержание A+B на полсекунды ставит паузу, повторное удержание снимает её.
+    if (input.holdA && input.holdB) {
+        if (game.pauseHoldFrames < PAUSE_HOLD_FRAMES) ++game.pauseHoldFrames;
+    } else {
+        game.pauseHoldFrames = 0;
+    }
+
     if (game.state == GameState::Title) {
         if (input.activateA || input.activateB) startGame(game);
         return;
@@ -186,6 +193,21 @@ void updateGame(Game& game, const InputFrame& input) {
     }
     if (game.state == GameState::StageCleared) {
         if (input.activateA || input.activateB) initShop(game);
+        return;
+    }
+    if (game.state == GameState::Paused) {
+        // Снятие с паузы так же, как вход: удержание A+B полсекунды.
+        if (game.pauseHoldFrames >= PAUSE_HOLD_FRAMES) {
+            game.state = GameState::Playing;
+            game.pauseHoldFrames = 0;
+        }
+        return;
+    }
+
+    // Вход в паузу при удержании A+B полсекунды
+    if (game.pauseHoldFrames >= PAUSE_HOLD_FRAMES) {
+        game.state = GameState::Paused;
+        game.pauseHoldFrames = 0;
         return;
     }
     Player& player = game.player;

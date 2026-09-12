@@ -25,6 +25,8 @@ void loop() {
         static_cast<int8_t>(arduboy.pressed(DOWN_BUTTON) - arduboy.pressed(UP_BUTTON)),
         arduboy.justPressed(A_BUTTON),
         arduboy.justPressed(B_BUTTON),
+        arduboy.pressed(A_BUTTON),
+        arduboy.pressed(B_BUTTON),
     };
     gc::updateGame(game, input);
     gc::renderGame(arduboy, game);

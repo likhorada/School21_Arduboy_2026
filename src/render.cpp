@@ -28,7 +28,7 @@ const uint8_t heartEmptyBitmap[] PROGMEM = {
 
 // Монетка очков: круглый контур и вертикальный штрих внутри.
 const uint8_t scoreCoinBitmap[] PROGMEM = {
-    0b01110, 0b10101, 0b10101, 0b10101, 0b01110,
+    0b01110, 0b10111, 0b10111, 0b11111, 0b01110,
 };
 
 // Спрайт игрока 7×7 пикселей, хранится во flash (PROGMEM).
@@ -487,6 +487,51 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
 
     arduboy.setCursor(20, 48);
     arduboy.print(F("A/B -> SHOP"));
+    return;
+  }
+
+  if (game.state == GameState::Paused) {
+    // Рисуем игровой мир позади (без обновления), затем накладываем надпись
+    // PAUSED Сначала рисуем арену как в обычном режиме
+    for (uint8_t y = 4; y < ARENA_HEIGHT; y += 12) {
+      for (uint8_t x = 4; x < ARENA_WIDTH; x += 12) {
+        arduboy.drawPixel(x, y + HUD_HEIGHT);
+      }
+    }
+    const uint8_t obstacleCount =
+        getStageObstacleCount(game.combat.currentStage);
+    for (uint8_t i = 0; i < obstacleCount; ++i) {
+      const Obstacle obstacle = readObstacle(game.combat.currentStage, i);
+      arduboy.fillRect(obstacle.x, obstacle.y + HUD_HEIGHT, obstacle.width,
+                       obstacle.height, BLACK);
+      arduboy.drawRect(obstacle.x, obstacle.y + HUD_HEIGHT, obstacle.width,
+                       obstacle.height);
+      arduboy.drawFastHLine(obstacle.x + 2, obstacle.y + HUD_HEIGHT + 2,
+                            obstacle.width - 4);
+    }
+    // Враги
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+      drawEnemy(arduboy, game.combat.enemies[i]);
+    }
+    // Сферы очков
+    for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
+      drawScoreOrb(arduboy, game.combat.scoreOrbs[i]);
+    }
+    // Игрок (без мигания)
+    drawPlayer(arduboy, game.player);
+    // Пули
+    for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
+      drawProjectile(arduboy, game.combat.projectiles[i]);
+    }
+    // UI колонка
+    drawUIColumn(arduboy, game);
+
+    // Надпись PAUSED по центру экрана (128x64)
+    // "PAUSED" = 6 символов * 6px = 36px ширина, центрируем: (128-36)/2 = 46
+    arduboy.setCursor(46, 28);
+    arduboy.print(F("PAUSED"));
+    arduboy.setCursor(34, 38);
+    arduboy.print(F("A+B TO RESUME"));
     return;
   }
 
