@@ -7,14 +7,17 @@ namespace {
 // Проверка коллизий врага (хитбокс 12x6, центр в centerX, centerY) с препятствиями.
 // Возвращает true, если позиция занята стеной.
 bool enemyHitsObstacle(int16_t centerX, int16_t centerY) {
-    const int16_t pixelX = centerX / FIXED_ONE;
-    const int16_t pixelY = centerY / FIXED_ONE;
+    if (centerX < ENEMY_HALF_WIDTH * FIXED_ONE ||
+        centerX > ARENA_WIDTH_FIXED - ENEMY_HALF_WIDTH * FIXED_ONE ||
+        centerY < ENEMY_HALF_HEIGHT * FIXED_ONE ||
+        centerY > ARENA_HEIGHT_FIXED - ENEMY_HALF_HEIGHT * FIXED_ONE) return true;
     for (uint8_t i = 0; i < OBSTACLE_COUNT; ++i) {
         const Obstacle obs = readObstacle(i);
-        if (pixelX - ENEMY_HALF_WIDTH < obs.x + obs.width &&
-            pixelX + ENEMY_HALF_WIDTH > obs.x &&
-            pixelY - ENEMY_HALF_HEIGHT < obs.y + obs.height &&
-            pixelY + ENEMY_HALF_HEIGHT > obs.y) {
+        const int16_t dx = obs.x * FIXED_ONE + obs.width * FIXED_ONE / 2 - centerX;
+        const int16_t dy = obs.y * FIXED_ONE + obs.height * FIXED_ONE / 2 - centerY;
+        const int16_t width = ENEMY_HALF_WIDTH * FIXED_ONE + obs.width * FIXED_ONE / 2;
+        const int16_t height = ENEMY_HALF_HEIGHT * FIXED_ONE + obs.height * FIXED_ONE / 2;
+        if (dx > -width && dx < width && dy > -height && dy < height) {
             return true;
         }
     }
@@ -26,8 +29,8 @@ bool pointHitsEnemy(int16_t px, int16_t py, int16_t ex, int16_t ey) {
     // ex, ey - центр врага
     // Текст и хитбокс: [-ENEMY_HALF_WIDTH..+ENEMY_HALF_WIDTH] по X,
     //                    [-ENEMY_HALF_HEIGHT..+ENEMY_HALF_HEIGHT] по Y
-    const int16_t dx = px - ex;
-    const int16_t dy = py - ey;
+    const int16_t dx = shortestDelta(ex, px, ARENA_WIDTH_FIXED);
+    const int16_t dy = shortestDelta(ey, py, ARENA_HEIGHT_FIXED);
     const int16_t halfWidth = ENEMY_HALF_WIDTH * FIXED_ONE;
     const int16_t halfHeight = ENEMY_HALF_HEIGHT * FIXED_ONE;
     return dx >= -halfWidth && dx <= halfWidth && dy >= -halfHeight && dy <= halfHeight;
@@ -35,8 +38,10 @@ bool pointHitsEnemy(int16_t px, int16_t py, int16_t ex, int16_t ey) {
 
 // Простое движение к игроку с проверкой коллизий и скольжением вдоль стен
 void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t speed) {
-    const int16_t dx = shortestDelta(enemy.x, playerX, ARENA_WIDTH_FIXED);
-    const int16_t dy = shortestDelta(enemy.y, playerY, ARENA_HEIGHT_FIXED);
+    const int16_t oldX = enemy.x;
+    const int16_t oldY = enemy.y;
+    const int16_t dx = playerX - enemy.x;
+    const int16_t dy = playerY - enemy.y;
     
     if (dx == 0 && dy == 0) {
         return;
@@ -62,11 +67,11 @@ void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t s
     }
     
     // Пробуем двигаться по X
-    const int16_t newX = wrapCoordinate(enemy.x + vx, ARENA_WIDTH_FIXED);
+    const int16_t newX = enemy.x + vx;
     const bool blockedX = enemyHitsObstacle(newX, enemy.y);
     
     // Пробуем двигаться по Y
-    const int16_t newY = wrapCoordinate(enemy.y + vy, ARENA_HEIGHT_FIXED);
+    const int16_t newY = enemy.y + vy;
     const bool blockedY = enemyHitsObstacle(enemy.x, newY);
     
     if (!blockedX) {
@@ -78,25 +83,47 @@ void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t s
     
     // Если оба направления заблокированы, пробуем скольжение перпендикулярно стене
     if (blockedX && blockedY && (vx != 0 || vy != 0)) {
-        const int16_t slideX = wrapCoordinate(enemy.x + vy, ARENA_WIDTH_FIXED);
+        const int16_t slideX = enemy.x + vy;
         if (!enemyHitsObstacle(slideX, enemy.y)) {
             enemy.x = slideX;
         } else {
-            const int16_t slideY = wrapCoordinate(enemy.y + vx, ARENA_HEIGHT_FIXED);
+            const int16_t slideY = enemy.y + vx;
             if (!enemyHitsObstacle(enemy.x, slideY)) {
                 enemy.y = slideY;
             }
         }
     }
+    if (enemyOverlapsPlayer(enemy.x, enemy.y, playerX, playerY) || enemyHitsObstacle(enemy.x, enemy.y)) {
+        enemy.x = oldX;
+        enemy.y = oldY;
+    }
 }
 
 } // anonymous namespace
+
+bool enemyPositionValid(int16_t x, int16_t y) {
+    return !enemyHitsObstacle(x, y);
+}
+
+bool enemyOverlapsPlayer(int16_t x, int16_t y, int16_t px, int16_t py, bool touching) {
+    const int16_t dx = shortestDelta(px, x, ARENA_WIDTH_FIXED);
+    const int16_t dy = shortestDelta(py, y, ARENA_HEIGHT_FIXED);
+    // One movement step of contact tolerance lets blocked pursuit still hurt.
+    const int16_t margin = touching ? FIXED_ONE + 1 : 0;
+    const int16_t w = ENEMY_HALF_WIDTH * FIXED_ONE + PLAYER_SIZE * FIXED_ONE / 2 + margin;
+    const int16_t h = ENEMY_HALF_HEIGHT * FIXED_ONE + PLAYER_SIZE * FIXED_ONE / 2 + margin;
+    return dx > -w && dx < w && dy > -h && dy < h;
+}
 
 // Спавн врага
 void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t variant) {
     enemy.x = x;
     enemy.y = y;
     enemy.splitLevel = 0;
+    if (!enemyPositionValid(x, y)) {
+        setEnemyTypeAndHp(enemy, EnemyType::None, 0);
+        return;
+    }
     
     switch (type) {
     case EnemyType::Basic:
@@ -151,8 +178,9 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
             {
                 // Скорость растёт при потере HP
                 const uint8_t currentHp = getEnemyHp(enemy);
-                const uint8_t lostHp = FAST_MAX_HP - currentHp;
-                speed = FAST_BASE_SPEED + lostHp * FAST_SPEED_INCREMENT;
+                const uint8_t lostHp = FAST_MAX_HP - (currentHp > FAST_MAX_HP ? FAST_MAX_HP : currentHp);
+                speed = FAST_BASE_SPEED + uint16_t(lostHp) * (FAST_MAX_SPEED - FAST_BASE_SPEED) / (FAST_MAX_HP - 1);
+                if (speed > FAST_MAX_SPEED) speed = FAST_MAX_SPEED;
             }
             break;
             
@@ -177,8 +205,8 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
             }
             
             // Проверяем расстояние (враги 6x6 пикселей)
-            const int16_t dx = shortestDelta(enemy1.x, enemy2.x, ARENA_WIDTH_FIXED);
-            const int16_t dy = shortestDelta(enemy1.y, enemy2.y, ARENA_HEIGHT_FIXED);
+            const int16_t dx = enemy2.x - enemy1.x;
+            const int16_t dy = enemy2.y - enemy1.y;
             const int16_t absDx = dx < 0 ? -dx : dx;
             const int16_t absDy = dy < 0 ? -dy : dy;
             const int16_t minDist = 6 * FIXED_ONE;
@@ -188,15 +216,15 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
                 const int8_t pushX = (dx > 0) ? 2 : -2;
                 const int8_t pushY = (dy > 0) ? 2 : -2;
                 
-                const int16_t newX1 = wrapCoordinate(enemy1.x - pushX, ARENA_WIDTH_FIXED);
-                const int16_t newY1 = wrapCoordinate(enemy1.y - pushY, ARENA_HEIGHT_FIXED);
-                if (!enemyHitsObstacle(newX1, enemy1.y)) enemy1.x = newX1;
-                if (!enemyHitsObstacle(enemy1.x, newY1)) enemy1.y = newY1;
+                const int16_t newX1 = enemy1.x - pushX;
+                const int16_t newY1 = enemy1.y - pushY;
+                if (!enemyHitsObstacle(newX1, enemy1.y) && !enemyOverlapsPlayer(newX1, enemy1.y, playerX, playerY)) enemy1.x = newX1;
+                if (!enemyHitsObstacle(enemy1.x, newY1) && !enemyOverlapsPlayer(enemy1.x, newY1, playerX, playerY)) enemy1.y = newY1;
                 
-                const int16_t newX2 = wrapCoordinate(enemy2.x + pushX, ARENA_WIDTH_FIXED);
-                const int16_t newY2 = wrapCoordinate(enemy2.y + pushY, ARENA_HEIGHT_FIXED);
-                if (!enemyHitsObstacle(newX2, enemy2.y)) enemy2.x = newX2;
-                if (!enemyHitsObstacle(enemy2.x, newY2)) enemy2.y = newY2;
+                const int16_t newX2 = enemy2.x + pushX;
+                const int16_t newY2 = enemy2.y + pushY;
+                if (!enemyHitsObstacle(newX2, enemy2.y) && !enemyOverlapsPlayer(newX2, enemy2.y, playerX, playerY)) enemy2.x = newX2;
+                if (!enemyHitsObstacle(enemy2.x, newY2) && !enemyOverlapsPlayer(enemy2.x, newY2, playerX, playerY)) enemy2.y = newY2;
             }
         }
     }
@@ -255,8 +283,8 @@ uint8_t collectOrbs(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t playerX, int16_t play
         }
         
         // Проверка касания с игроком (радиус сбора)
-        const int16_t dx = orbs[i].x - playerX;
-        const int16_t dy = orbs[i].y - playerY;
+        const int16_t dx = shortestDelta(playerX, orbs[i].x, ARENA_WIDTH_FIXED);
+        const int16_t dy = shortestDelta(playerY, orbs[i].y, ARENA_HEIGHT_FIXED);
         const int32_t distSq = static_cast<int32_t>(dx) * dx + static_cast<int32_t>(dy) * dy;
         const int16_t collectRadius = 10 * FIXED_ONE;
         

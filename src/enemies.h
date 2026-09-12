@@ -64,7 +64,11 @@ constexpr uint8_t SPLITTER_SPEED = 8;
 
 constexpr uint8_t FAST_BASE_SPEED = 4;
 constexpr uint8_t FAST_MAX_HP = 15;         // 0F в hex
-constexpr uint8_t FAST_SPEED_INCREMENT = 1; // +скорость за потерянное HP
+constexpr uint8_t FAST_MAX_SPEED = 13;
+// Вектор (13,6) медленнее даже диагонального шага игрока (11,11).
+static_assert(FAST_MAX_SPEED * FAST_MAX_SPEED + (FAST_MAX_SPEED / 2) * (FAST_MAX_SPEED / 2)
+              < 2 * ((WALK_SPEED * 181 + 128) / 256) * ((WALK_SPEED * 181 + 128) / 256),
+              "Fast enemy must remain slower than walking");
 
 // Хитбокс врага: половины размера компактного текста в пикселях.
 // Максимальная подпись "d10" = 12x5, поэтому хитбокс 12x6.
@@ -77,6 +81,9 @@ static_assert(SPLITTER_BASE_HP <= 31, "Packed HP uses five bits");
 
 // Функции
 void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t variant);
+bool enemyOverlapsPlayer(int16_t x, int16_t y, int16_t playerCenterX, int16_t playerCenterY,
+                         bool touching = false);
+bool enemyPositionValid(int16_t x, int16_t y);
 
 void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
                    int16_t playerX, int16_t playerY, uint32_t& randomState);

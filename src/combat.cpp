@@ -11,13 +11,6 @@
 namespace gc {
 namespace {
 
-// Стартовые позиции врагов на арене (flash/PROGMEM, экономим SRAM)
-const uint8_t dummyPositions[DUMMY_COUNT][2]
-#ifdef __AVR__
-    PROGMEM
-#endif
-    = {{64, 7}, {88, 45}, {120, 3}};
-
 constexpr int8_t NO_HIT = -1;
 constexpr int8_t WALL_HIT = -2;
 
@@ -61,10 +54,20 @@ int8_t findHit(const Combat& combat, int16_t x, int16_t y, int16_t dx, int16_t d
             return i;
         }
     }
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+        const Enemy& enemy = combat.enemies[i];
+        if (getEnemyType(enemy) == EnemyType::None) continue;
+        const Obstacle box = {
+            uint8_t(wrapCoordinate(enemy.x / FIXED_ONE - ENEMY_HALF_WIDTH, ARENA_WIDTH)),
+            uint8_t(wrapCoordinate(enemy.y / FIXED_ONE - ENEMY_HALF_HEIGHT, ARENA_HEIGHT)),
+            2 * ENEMY_HALF_WIDTH, 2 * ENEMY_HALF_HEIGHT
+        };
+        if (segmentHitsBox(x, y, dx, dy, box)) return DUMMY_COUNT + i;
+    }
     return NO_HIT;
 }
 
-// Двигаем активную пулю шагами не больше пикселя. Попадание освобождает её слот.
+// Двигаем активную пулю шагами не больше пикселя. Попадание освобождаёт её слот.
 int8_t advanceProjectile(Projectile& projectile, const Combat& combat) {
     int8_t previousX = 0;
     int8_t previousY = 0;
@@ -92,9 +95,6 @@ int8_t advanceProjectile(Projectile& projectile, const Combat& combat) {
 
 } // внутренние функции модуля
 
-// Предварительный прототип: проверка позиции от препятствий (используется при спавне)
-bool isPositionValid(int16_t x, int16_t y);
-
 // Сброс боевой системы: очищаем всё, возвращаем врагов на стартовые позиции.
 void resetCombat(Combat& combat) {
     combat = {};
@@ -105,13 +105,38 @@ void resetCombat(Combat& combat) {
     combat.currentStage = 0;
     combat.currentWave = 0;
     combat.waveCompleted = false;
+    combat.stageCleared = false;
+    combat.stageTimer = STAGE_TIME_FRAMES;  // 60 секунд
     
     // Предупреждение перед первой волной
     combat.spawnTimer = SPAWN_DELAY_FRAMES;
 }
 
+// Read-only contact query; health and invulnerability belong to the player.
+bool checkPlayerEnemyCollisions(const Combat& combat, int16_t playerX, int16_t playerY, bool touching) {
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+        const Enemy& enemy = combat.enemies[i];
+        if (getEnemyType(enemy) == EnemyType::None) {
+            continue;
+        }
+        // Player coordinates are top-left; enemies store centers.
+        const int16_t playerCenterX = playerX + (PLAYER_SIZE * FIXED_ONE) / 2;
+        const int16_t playerCenterY = playerY + (PLAYER_SIZE * FIXED_ONE) / 2;
+        if (enemyOverlapsPlayer(enemy.x, enemy.y, playerCenterX, playerCenterY, touching)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Обновление боевой системы на текущий кадр.
-void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
+void updateCombat(Combat& combat, int16_t playerX, int16_t playerY, uint8_t damage) {
+    if (combat.stageCleared) return;
+    // Bonus clock includes spawn warnings; expiration never changes progression.
+    if (combat.stageTimer > 0) {
+        --combat.stageTimer;
+    }
+
     if (combat.shotCooldown > 0) {
         --combat.shotCooldown;
     }
@@ -121,20 +146,18 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
     const int16_t originY = wrapCoordinate(playerY + PLAYER_SIZE * FIXED_ONE / 2,
                                             ARENA_HEIGHT_FIXED);
 
-    // Отсчёт таймера спавна волны
-    if (combat.spawnTimer > 0) {
-        --combat.spawnTimer;
-        if (combat.spawnTimer == 0) {
-            spawnCurrentWave(combat, originX, originY);
-        }
+    // Обновляем новую систему врагов
+    if (combat.freezeFrames > 0) {
+        --combat.freezeFrames;
+    } else {
+        updateEnemies(combat.enemies, combat.scoreOrbs,
+                      originX, originY, combat.enemyRandomState);
     }
 
-    // Обновляем новую систему врагов
-    updateEnemies(combat.enemies, combat.scoreOrbs,
-                  originX, originY, combat.enemyRandomState);
-
-    // Проверяем завершение волны
-    checkWaveCompletion(combat);
+    // Новые враги первый кадр остаются точно на индикаторах.
+    if (combat.spawnTimer > 0 && --combat.spawnTimer == 0) {
+        spawnCurrentWave(combat, originX, originY);
+    }
 
     // Существующие пули обновляем до создания новой: порядок слотов не влияет на полёт.
     for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
@@ -143,7 +166,9 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
             continue;
         }
         const int8_t hit = advanceProjectile(projectile, combat);
-        if (hit >= 0) {
+        if (hit >= DUMMY_COUNT) {
+            damageEnemy(combat, hit - DUMMY_COUNT, damage);
+        } else if (hit >= 0) {
             Dummy& dummy = combat.dummies[hit];
             const uint8_t hp = getHp(dummy);
             // Проверяем смерть до вычитания: без этого unsigned HP может переполниться.
@@ -156,70 +181,11 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
         }
     }
     
-    // Проверяем попадания пуль по новым врагам
-    for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
-        Projectile& projectile = combat.projectiles[i];
-        if (projectile.framesLeft == 0) {
-            continue;
-        }
-        
-        // Проверяем попадание по обычным врагам
-        for (uint8_t j = 0; j < MAX_ENEMIES; ++j) {
-            Enemy& enemy = combat.enemies[j];
-            if (getEnemyType(enemy) == EnemyType::None) {
-                continue;
-            }
-            
-            const int8_t result = checkEnemyHit(enemy, projectile.x, projectile.y);
-            if (result > 0) {
-                // Враг убит
-                const EnemyType type = getEnemyType(enemy);
-                // К моменту смерти HP выстрелами сбито до 1, поэтому для
-                // Splitter используем размер из splitLevel (аналог Minecraft-слизня).
-                const uint8_t size = (type == EnemyType::Splitter)
-                                     ? enemy.splitLevel : getEnemyHp(enemy);
-                
-                // Создаём дроп очков
-                const uint8_t scoreValue = getEnemyScoreValue(type, size);
-                createScoreOrb(combat.scoreOrbs, enemy.x, enemy.y, scoreValue);
-                
-                // Обрабатываем деление для Splitter: делим размер пополам (до 1 HP).
-                // Потомки появляются сразу на позиции родителя, расталкивание разведёт их.
-                if (type == EnemyType::Splitter && size > 1) {
-                    // Сохраняем координаты до обнуления
-                    const int16_t parentX = enemy.x;
-                    const int16_t parentY = enemy.y;
-                    const uint8_t childHp = size / 2;
-                    
-                    // Сначала обнуляем родителя
-                    setEnemyType(enemy, EnemyType::None);
-                    
-                    // Создаём двух потомков в точку смерти
-                    uint8_t spawned = 0;
-                    for (uint8_t k = 0; k < MAX_ENEMIES && spawned < 2; ++k) {
-                        if (getEnemyType(combat.enemies[k]) == EnemyType::None) {
-                            spawnEnemy(combat.enemies[k], EnemyType::Splitter,
-                                      parentX, parentY, childHp);
-                            ++spawned;
-                        }
-                    }
-                } else {
-                    setEnemyType(enemy, EnemyType::None);
-                }
-                
-                projectile.framesLeft = 0;
-                break;
-            } else if (result == 0) {
-                // Попадание без смерти
-                projectile.framesLeft = 0;
-                break;
-            }
-        }
-    }
-    
     // Собираем сферы очков
     const uint8_t collectedScore = collectOrbs(combat.scoreOrbs, originX, originY);
     combat.playerScore += collectedScore;
+    checkWaveCompletion(combat);
+    if (combat.stageCleared) return;
 
     // Автострельба: кулдаун тратится только после успешного создания пули.
     if (combat.shotCooldown != 0) {
@@ -257,7 +223,7 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
         const int16_t candidateY = shortestDelta(originY, targetY, ARENA_HEIGHT_FIXED);
         const uint32_t distanceSquared = static_cast<int32_t>(candidateX) * candidateX
                                          + static_cast<int32_t>(candidateY) * candidateY;
-        if (distanceSquared < bestDistanceSquared) {
+        if (distanceSquared < bestDistanceSquared && !shotBlocked(originX, originY, candidateX, candidateY)) {
             bestDistanceSquared = distanceSquared;
             bestTarget = i;
             bestDx = candidateX;
@@ -269,10 +235,6 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
         return; // Нет целей в радиусе
     }
     
-    if (shotBlocked(originX, originY, bestDx, bestDy)) {
-        return; // Стена блокирует
-    }
-
     const uint16_t length = aimLength(bestDistanceSquared);
     Projectile shot = {originX, originY, aimVelocity(bestDx, length),
                        aimVelocity(bestDy, length), PROJECTILE_LIFETIME};
@@ -283,14 +245,25 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY) {
     combat.projectiles[freeSlot] = shot;
     combat.shotCooldown = SHOT_INTERVAL;
 }
+
 void spawnCurrentWave(Combat& combat, int16_t playerX, int16_t playerY) {
+    const uint8_t enemyCount = getWaveEnemyCount(combat.currentStage, combat.currentWave);
+    // Занятый маркер задерживает всю волну, но не меняет её позиции.
+    for (uint8_t i = 0; i < enemyCount && i < MAX_ENEMIES; ++i) {
+        if (readWaveEnemy(combat.currentStage, combat.currentWave, i).type == EnemyType::None) continue;
+        uint8_t x, y;
+        getSpawnPixel(combat.currentStage, combat.currentWave, i, x, y);
+        if (!enemyPositionValid(x * FIXED_ONE, y * FIXED_ONE) ||
+            enemyOverlapsPlayer(x * FIXED_ONE, y * FIXED_ONE, playerX, playerY, true)) {
+            combat.spawnTimer = 2;
+            return;
+        }
+    }
+    combat.spawnTimer = 0;
     // Очищаем всех врагов
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
         setEnemyType(combat.enemies[i], EnemyType::None);
     }
-    
-    // Получаем количество врагов в текущей волне
-    const uint8_t enemyCount = getWaveEnemyCount(combat.currentStage, combat.currentWave);
     
     // Спавним врагов из данных волны на детерминированных случайных позициях
     for (uint8_t i = 0; i < enemyCount && i < MAX_ENEMIES; ++i) {
@@ -300,30 +273,6 @@ void spawnCurrentWave(Combat& combat, int16_t playerX, int16_t playerY) {
             uint8_t px = 0;
             uint8_t py = 0;
             getSpawnPixel(combat.currentStage, combat.currentWave, i, px, py);
-            
-            const int16_t spawnX = px * FIXED_ONE;
-            const int16_t spawnY = py * FIXED_ONE;
-            
-            // Если позиция слишком близко к игроку, отодвигаем врага в сторону
-            const int16_t dx = shortestDelta(spawnX, playerX, ARENA_WIDTH_FIXED);
-            const int16_t dy = shortestDelta(spawnY, playerY, ARENA_HEIGHT_FIXED);
-            const int32_t distSq = static_cast<int32_t>(dx) * dx
-                                   + static_cast<int32_t>(dy) * dy;
-            const int16_t safeDist = 14 * FIXED_ONE;
-            
-            if (distSq < static_cast<int32_t>(safeDist) * safeDist) {
-                int16_t moveX = dx < 0 ? safeDist : (dx > 0 ? -safeDist : 0);
-                int16_t moveY = dy < 0 ? safeDist : (dy > 0 ? -safeDist : 0);
-                if (moveX == 0 && moveY == 0) {
-                    moveY = -safeDist; // Спавн точно в игроке: уходим вверх
-                }
-                const int16_t nudgeX = wrapCoordinate(spawnX + moveX, ARENA_WIDTH_FIXED);
-                const int16_t nudgeY = wrapCoordinate(spawnY + moveY, ARENA_HEIGHT_FIXED);
-                if (isPositionValid(nudgeX, nudgeY)) {
-                    px = nudgeX / FIXED_ONE;
-                    py = nudgeY / FIXED_ONE;
-                }
-            }
             
             spawnEnemy(combat.enemies[i], waveEnemy.type,
                        px * FIXED_ONE, py * FIXED_ONE, waveEnemy.hp);
@@ -352,7 +301,7 @@ void getSpawnPixel(uint8_t stage, uint8_t wave, uint8_t index, uint8_t& x, uint8
         state ^= state << 5;
         const uint8_t py = static_cast<uint8_t>(state % ARENA_HEIGHT);
         
-        if (isPositionValid(px * FIXED_ONE, py * FIXED_ONE)) {
+        if (enemyPositionValid(px * FIXED_ONE, py * FIXED_ONE)) {
             x = px;
             y = py;
             return;
@@ -366,6 +315,7 @@ void getSpawnPixel(uint8_t stage, uint8_t wave, uint8_t index, uint8_t& x, uint8
 
 // Проверка завершения волны и переход к следующей
 void checkWaveCompletion(Combat& combat) {
+    if (combat.spawnTimer > 0 || combat.stageCleared) return;
     // Проверяем, есть ли живые враги
     bool anyAlive = false;
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
@@ -378,6 +328,9 @@ void checkWaveCompletion(Combat& combat) {
     if (!anyAlive && !combat.waveCompleted) {
         combat.waveCompleted = true;
         
+        // Бонус за волну
+        combat.playerScore += WAVE_CLEAR_BONUS;
+
         // Переходим к следующей волне
         ++combat.currentWave;
         
@@ -385,13 +338,17 @@ void checkWaveCompletion(Combat& combat) {
         const uint8_t totalWaves = getStageWaveCount(combat.currentStage);
         
         if (combat.currentWave >= totalWaves) {
-            // Стейдж завершён: готовим следующий, но не спавним его.
-            // Игрок видит меню отдыха и продолжает нажатием A/B.
-            combat.currentWave = 0;
-            ++combat.currentStage;
-            if (combat.currentStage >= TOTAL_STAGES) {
-                combat.currentStage = 0; // Игра зацикливается
+            // Bank remaining drops before leaving; no rewards disappear in the shop.
+            for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
+                if (combat.scoreOrbs[i].lifetime) combat.playerScore += combat.scoreOrbs[i].value;
+                combat.scoreOrbs[i].lifetime = 0;
             }
+            for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) combat.projectiles[i].framesLeft = 0;
+            // Стейдж завершён: бонус за оставшееся время
+            const uint16_t timeBonus = remainingSeconds(combat.stageTimer) * STAGE_TIME_BONUS_MULT;
+            combat.playerScore += timeBonus;
+
+            // Keep this stage's index/timer for its results. Shop advances the index.
             combat.stageCleared = true;
             combat.spawnTimer = 0;
             return;
@@ -402,25 +359,33 @@ void checkWaveCompletion(Combat& combat) {
     }
 }
 
-// Проверка, свободна ли позиция от препятствий
-bool isPositionValid(int16_t x, int16_t y) {
-    const int16_t pixelX = x / FIXED_ONE;
-    const int16_t pixelY = y / FIXED_ONE;
-    
-    // Проверяем коллизию с препятствиями (враг 12x6, центрированный)
-    for (uint8_t i = 0; i < OBSTACLE_COUNT; ++i) {
-        const Obstacle obs = readObstacle(i);
-        if (pixelX - ENEMY_HALF_WIDTH < obs.x + obs.width &&
-            pixelX + ENEMY_HALF_WIDTH > obs.x &&
-            pixelY - ENEMY_HALF_HEIGHT < obs.y + obs.height &&
-            pixelY + ENEMY_HALF_HEIGHT > obs.y) {
-            return false;
+void damageEnemy(Combat& combat, uint8_t index, uint8_t damage) {
+    if (index >= MAX_ENEMIES || damage == 0) return;
+    Enemy& enemy = combat.enemies[index];
+    const EnemyType type = getEnemyType(enemy);
+    if (type == EnemyType::None) return;
+    if (getEnemyHp(enemy) > damage) {
+        setEnemyHp(enemy, getEnemyHp(enemy) - damage);
+        return;
+    }
+    const uint8_t size = enemy.splitLevel;
+    const int16_t x = enemy.x, y = enemy.y;
+    const uint8_t value = getEnemyScoreValue(type, size);
+    bool freeOrb = false;
+    for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) freeOrb |= combat.scoreOrbs[i].lifetime == 0;
+    if (freeOrb) createScoreOrb(combat.scoreOrbs, x, y, value);
+    else combat.playerScore += value;
+    setEnemyType(enemy, EnemyType::None);
+    if (type == EnemyType::Splitter && size > 1) {
+        uint8_t spawned = 0;
+        for (uint8_t i = 0; i < MAX_ENEMIES && spawned < 2; ++i) {
+            if (getEnemyType(combat.enemies[i]) == EnemyType::None) {
+                spawnEnemy(combat.enemies[i], type, x, y, size / 2);
+                ++spawned;
+            }
         }
     }
-    return true;
 }
-
-// Старые функции удалены - теперь используется система волн из stages.h
 
 // Получение стоимости врага в очках
 uint8_t getEnemyScoreValue(EnemyType type, uint8_t hp) {

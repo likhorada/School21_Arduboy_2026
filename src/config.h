@@ -4,8 +4,8 @@
 
 namespace gc {
 
-constexpr uint8_t HUD_HEIGHT = 8;
-constexpr uint8_t ARENA_WIDTH = 128;
+constexpr uint8_t HUD_HEIGHT = 0;
+constexpr uint8_t ARENA_WIDTH = 104;
 constexpr uint8_t ARENA_HEIGHT = 64 - HUD_HEIGHT;
 // Позиции игрока и пуль храним в 1/16 пикселя: 24 единицы означают 1,5 пикселя.
 constexpr uint8_t FIXED_ONE = 16;
@@ -62,5 +62,39 @@ static_assert(DUMMY_SIZE <= ARENA_WIDTH / 2 && DUMMY_SIZE <= ARENA_HEIGHT / 2,
 // Упаковка не должна молча обрезать HP или длительность вспышки при смене настроек.
 static_assert(DUMMY_MAX_HP > 0 && DUMMY_MAX_HP <= 3, "Packed HP uses two bits");
 static_assert(HIT_FLASH_FRAMES <= 7, "Packed hit flash uses three bits");
+
+// === ИГРОВЫЕ КОНСТАНТЫ ===
+// HP и неуязвимость
+constexpr uint8_t PLAYER_BASE_MAX_HP = 4;
+constexpr uint8_t PLAYER_MAX_HP_CAP = 6;
+constexpr uint8_t IFRAME_DURATION = 60;      // 1 секунда при 62.5 FPS
+constexpr uint8_t BLINK_INTERVAL = 4;        // Мигание каждые 4 кадра
+
+// Стейдж таймер
+constexpr uint16_t STAGE_TIME_SECONDS = 60;
+constexpr uint16_t STAGE_TIME_FRAMES = uint32_t(STAGE_TIME_SECONDS) * 1000 / FRAME_DURATION_MS;
+static_assert(STAGE_TIME_FRAMES == 3750, "Stage timer must be exactly 60 seconds");
+inline uint8_t remainingSeconds(uint16_t frames) {
+    return uint32_t(frames) * FRAME_DURATION_MS / 1000;
+}
+constexpr uint16_t PASSIVE_PRICE = 100;
+constexpr uint16_t ACTIVE_PRICE = 200;
+constexpr uint8_t SWEEP_DAMAGE = 4;
+constexpr uint8_t SWEEP_RADIUS = 24;
+constexpr uint8_t FREEZE_DURATION = 90;
+constexpr uint8_t COMPACT_SHIELD_DURATION = 60;
+
+// UI: правая колонка x=104 (128-24), 6 строк по 8px
+constexpr uint8_t UI_COLUMN_X = 104;
+constexpr uint8_t UI_ROW_HEIGHT = 8;
+constexpr uint8_t UI_HEART_SIZE = 5;
+
+// Очки за волну/стадию
+constexpr uint16_t WAVE_CLEAR_BONUS = 50;
+constexpr uint16_t STAGE_TIME_BONUS_MULT = 100;
+
+// Магазин: количество вариантов
+constexpr uint8_t SHOP_PASSIVE_CHOICES = 3;
+constexpr uint8_t SHOP_ACTIVE_CHOICES = 3;
 
 } // пространство имён gc

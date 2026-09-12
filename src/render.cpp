@@ -7,6 +7,25 @@
 namespace gc {
 namespace {
 
+// Сердечко 5×5 пикселей (PROGMEM)
+const uint8_t heartBitmap[] PROGMEM = {
+    0b01010,  // .#.#.
+    0b11111,  // #####
+    0b11111,  // #####
+    0b01110,  // .###.
+    0b00100   // ..#..
+};
+static_assert(sizeof(heartBitmap) == 5, "Heart bitmap must be 5 bytes");
+
+// Пустое/потерянное сердечко (контур)
+const uint8_t heartEmptyBitmap[] PROGMEM = {
+    0b01010,
+    0b10001,
+    0b10001,
+    0b01110,
+    0b00100
+};
+
 // Спрайт игрока 7×7 пикселей, хранится во flash (PROGMEM).
 const uint8_t playerBitmap[] PROGMEM = {0x3e, 0x7f, 0x55, 0x5d, 0x55, 0x7f, 0x3e};
 static_assert(sizeof(playerBitmap) == PLAYER_SIZE && PLAYER_SIZE == 7,
@@ -102,14 +121,15 @@ uint8_t tinyFontIndex(char c) {
     return 17;  // 'd'
 }
 
-// Рисуем 4×5 глиф на арене (с обёрткой через края).
+// Глиф врага обрезается краем арены, не переносится на другую сторону.
 void drawTinyGlyph(Arduboy2& arduboy, char c, int16_t x, int16_t y) {
     const uint8_t* data = &tinyFont[tinyFontIndex(c) * 5];
     for (uint8_t row = 0; row < 5; ++row) {
         const uint8_t bits = pgm_read_byte(data + row);
         for (uint8_t col = 0; col < 4; ++col) {
-            if (bits & (0x08 >> col)) {
-                drawArenaPixel(arduboy, x + col, y + row, WHITE);
+            if ((bits & (0x08 >> col)) && x + col >= 0 && x + col < ARENA_WIDTH &&
+                y + row >= 0 && y + row < ARENA_HEIGHT) {
+                arduboy.drawPixel(x + col, HUD_HEIGHT + y + row, WHITE);
             }
         }
     }
@@ -141,8 +161,8 @@ void drawEnemy(Arduboy2& arduboy, const Enemy& enemy) {
     }
 
     // Центрируем текст относительно позиции врага (enny = 4×len × 5)
-    const int16_t centerX = wrapCoordinate(enemy.x / FIXED_ONE, ARENA_WIDTH);
-    const int16_t centerY = wrapCoordinate(enemy.y / FIXED_ONE, ARENA_HEIGHT);
+    const int16_t centerX = enemy.x / FIXED_ONE;
+    const int16_t centerY = enemy.y / FIXED_ONE;
     const int16_t startX = centerX - static_cast<int16_t>(len) * 2;  // (4 * len) / 2
     const int16_t startY = centerY - 2;                                // 5 / 2
 
@@ -161,8 +181,11 @@ void drawScoreOrb(Arduboy2& arduboy, const ScoreOrb& orb) {
     const int16_t screenX = wrapCoordinate(orb.x / FIXED_ONE, ARENA_WIDTH);
     const int16_t screenY = HUD_HEIGHT + wrapCoordinate(orb.y / FIXED_ONE, ARENA_HEIGHT);
     
-    // Простой круг 3x3
-    arduboy.drawCircle(screenX + 1, screenY + 1, 1, WHITE);
+    drawArenaPixel(arduboy, screenX, screenY, WHITE);
+    drawArenaPixel(arduboy, screenX - 1, screenY, WHITE);
+    drawArenaPixel(arduboy, screenX + 1, screenY, WHITE);
+    drawArenaPixel(arduboy, screenX, screenY - 1, WHITE);
+    drawArenaPixel(arduboy, screenX, screenY + 1, WHITE);
 }
 
 // Рисуем предупреждающие квадраты перед спавном волны
@@ -188,26 +211,118 @@ void drawSpawnIndicators(Arduboy2& arduboy, const Combat& combat) {
         
         // Мигаем: показываем чётные кадры, скрываем нечётные
         if (combat.spawnTimer & 1) {
-            arduboy.fillRect(screenX - 2, screenY - 2, 4, 4, WHITE);
+            for (int8_t y = -2; y < 2; ++y)
+                for (int8_t x = -2; x < 2; ++x)
+                    drawArenaPixel(arduboy, screenX + x, screenY + y, WHITE);
         }
     }
 }
 
 // Рисуем один слот активной способности в HUD.
 // label — буква A или B, показываем название способности и заряд.
-void drawSlot(Arduboy2& arduboy, uint8_t x, char label, const ActiveSlot& slot) {
-    arduboy.setCursor(x, 0);
-    arduboy.print(label);
-    if (slot.ability == AbilityId::None) {
-        arduboy.print(F(":--"));
-        return;
+void printAbility(Arduboy2& arduboy, AbilityId ability) {
+    switch (ability) {
+    case AbilityId::Dash: arduboy.print(F("Dash")); break;
+    case AbilityId::MarkAndSweep: arduboy.print(F("Sweep")); break;
+    case AbilityId::StopTheWorld: arduboy.print(F("Freeze")); break;
+    case AbilityId::Compact: arduboy.print(F("Compact")); break;
+    default: arduboy.print(F("Empty")); break;
     }
-    arduboy.print(F(":DASH"));
-    arduboy.drawRect(x + 38, 1, 23, 6);
-    const uint8_t readyWidth = static_cast<uint16_t>(DASH_COOLDOWN - slot.cooldown)
-                               * 21 / DASH_COOLDOWN;
-    if (readyWidth > 0) {
-        arduboy.fillRect(x + 39, 2, readyWidth, 4);
+}
+
+// Рисуем сердечко 5x5 в указанной позиции
+void drawHeart(Arduboy2& arduboy, int16_t x, int16_t y, const uint8_t* bitmap) {
+    for (uint8_t row = 0; row < 5; ++row) {
+        const uint8_t bits = pgm_read_byte(&bitmap[row]);
+        for (uint8_t col = 0; col < 5; ++col) {
+            if (bits & (0x10 >> col)) {
+                arduboy.drawPixel(x + col, y + row, WHITE);
+            }
+        }
+    }
+}
+
+// Рисуем правую колонку UI (x=104, 6 строк по 8px)
+// Строка 0: lvl<N>
+// Строка 1: 4 сердечка HP (+ подсветка 5-6)
+// Строка 2: Score (4 цифры или 10k/11k...)
+// Строка 3: Time remaining (секунды)
+// Строка 4: Slot A cooldown bar
+// Строка 6: Slot B cooldown bar
+void drawUIColumn(Arduboy2& arduboy, const Game& game) {
+    const uint8_t colX = UI_COLUMN_X;
+    const uint8_t rowH = UI_ROW_HEIGHT;
+
+    // Строка 0: номер стейджа "lvl1", "lvl2"...
+    arduboy.setCursor(colX, 0 * rowH);
+    arduboy.print(F("lvl"));
+    arduboy.print(game.combat.currentStage + 1);
+
+    // Строка 1: сердечка HP
+    const uint8_t heartY = 1 * rowH + 1;  // +1 для центрирования в 8px
+    for (uint8_t i = 0; i < 4; ++i) {
+        const int16_t hx = colX + i * 6;  // 5px сердечко + 1px отступ
+        const uint8_t state = heartState(game.player.hp, i);
+        drawHeart(arduboy, hx, heartY, state ? heartBitmap : heartEmptyBitmap);
+        if (state == 2) arduboy.drawPixel(hx + 2, heartY + 2, BLACK);
+    }
+
+    // Строка 2: Score (4 цифры или 10k/11k...)
+    arduboy.setCursor(colX, 2 * rowH);
+    const uint16_t score = game.combat.playerScore;
+    if (score >= 10000) {
+        arduboy.print(score / 1000);
+        arduboy.print(F("k"));
+    } else {
+        // Выравнивание в 4 символа
+        if (score < 1000) arduboy.print(F(" "));
+        if (score < 100) arduboy.print(F(" "));
+        if (score < 10) arduboy.print(F(" "));
+        arduboy.print(score);
+    }
+
+    // Строка 3: Time remaining в секундах
+    arduboy.setCursor(colX, 3 * rowH);
+    const uint16_t timeLeft = remainingSeconds(game.combat.stageTimer);
+    if (timeLeft < 10) arduboy.print(F(" "));
+    if (timeLeft < 100) arduboy.print(F(" "));
+    arduboy.print(timeLeft);
+
+    // Строка 4: Slot A cooldown bar (мини-версия)
+    {
+        const ActiveSlot& slot = game.player.slots[0];
+        arduboy.setCursor(colX, 4 * rowH);
+        arduboy.print(F("A"));
+        if (slot.ability != AbilityId::None) {
+            // Маленькая полоска кд: 16px ширина
+            const uint8_t maxCd = abilityCooldown(slot.ability);
+            const uint8_t readyWidth = (maxCd > slot.cooldown)
+                ? (static_cast<uint16_t>(maxCd - slot.cooldown) * 14 / maxCd) : 0;
+            arduboy.drawRect(colX + 8, 4 * rowH + 1, 16, 4);
+            if (readyWidth > 0) {
+                arduboy.fillRect(colX + 9, 4 * rowH + 2, readyWidth, 2);
+            }
+        } else {
+            arduboy.print(F(":--"));
+        }
+    }
+
+    // Slot B uses its own ability's full cooldown.
+    {
+        const ActiveSlot& slot = game.player.slots[1];
+        arduboy.setCursor(colX, 5 * rowH);
+        arduboy.print(F("B"));
+        if (slot.ability != AbilityId::None) {
+            const uint8_t maxCd = abilityCooldown(slot.ability);
+            const uint8_t readyWidth = (maxCd > slot.cooldown)
+                ? (static_cast<uint16_t>(maxCd - slot.cooldown) * 14 / maxCd) : 0;
+            arduboy.drawRect(colX + 8, 5 * rowH + 1, 16, 4);
+            if (readyWidth > 0) {
+                arduboy.fillRect(colX + 9, 5 * rowH + 2, readyWidth, 2);
+            }
+        } else {
+            arduboy.print(F(":--"));
+        }
     }
 }
 
@@ -216,30 +331,100 @@ void drawSlot(Arduboy2& arduboy, uint8_t x, char label, const ActiveSlot& slot) 
 // Отрисовка всего игрового экрана.
 void renderGame(Arduboy2& arduboy, const Game& game) {
     arduboy.clear();
+    arduboy.setTextWrap(false);
     if (game.state == GameState::Title) {
-        arduboy.setCursor(19, 5);
+        arduboy.setCursor(16, 5);
         arduboy.print(F("GARBAGE COLLECTOR"));
         arduboy.setCursor(31, 21);
-        arduboy.print(F("COMBAT TEST"));
+        arduboy.print(F("CLEAR WAVES"));
         arduboy.setCursor(10, 33);
-        arduboy.print(F("D-PAD MOVE / A DASH"));
-        arduboy.setCursor(16, 43);
-        arduboy.print(F("AUTO FIRE / 3 HP"));
+        arduboy.print(F("D-PAD MOVE"));
+        arduboy.setCursor(0, 43);
+        arduboy.print(F("AUTO FIRE / A-B SKILL"));
         arduboy.setCursor(28, 55);
         arduboy.print(F("A/B TO START"));
+        return;
+    }
+
+    if (game.state == GameState::Shop) {
+        arduboy.setCursor(0, 0);
+        arduboy.print(F("SHOP $"));
+        arduboy.print(game.combat.playerScore);
+        if (game.shop.choosingSlot) {
+            arduboy.setCursor(0, 16);
+            arduboy.print(F("Equip "));
+            printAbility(arduboy, static_cast<AbilityId>(game.shop.activeChoices[game.shop.selectedIndex - 3] + 1));
+            arduboy.setCursor(0, 24);
+            arduboy.print(F("A: "));
+            printAbility(arduboy, game.player.slots[0].ability);
+            arduboy.setCursor(0, 32);
+            arduboy.print(F("B: "));
+            printAbility(arduboy, game.player.slots[1].ability);
+            arduboy.setCursor(0, 48);
+            arduboy.print(F("A/B REPLACE $"));
+            arduboy.print(ACTIVE_PRICE);
+            arduboy.setCursor(0, 56);
+            arduboy.print(F("LEFT CANCEL"));
+            return;
+        }
+        const bool activePage = game.shop.selectedIndex >= 3 && game.shop.selectedIndex < 6;
+        arduboy.setCursor(0, 8);
+        arduboy.print(activePage ? F("ACTIVE $") : F("PASSIVE $"));
+        arduboy.print(activePage ? ACTIVE_PRICE : PASSIVE_PRICE);
+        const bool bought = activePage ? game.shop.activeBought : game.shop.passiveBought;
+        if (bought) arduboy.print(F(" BOUGHT"));
+        for (uint8_t i = 0; i < 3; ++i) {
+            arduboy.setCursor(0, 16 + i * 8);
+            if (i + (activePage ? 3 : 0) == game.shop.selectedIndex) arduboy.print(F("> "));
+            else arduboy.print(F("  "));
+            if (activePage) {
+                printAbility(arduboy, static_cast<AbilityId>(game.shop.activeChoices[i] + 1));
+                continue;
+            }
+            switch (static_cast<PassiveId>(game.shop.passiveChoices[i])) {
+            case PassiveId::DamageUp: arduboy.print(F("DMG Up")); break;
+            case PassiveId::MaxHpUp: arduboy.print(F("Max HP Up")); break;
+            case PassiveId::MoveSpeedUp: arduboy.print(F("Speed Up")); break;
+            default: arduboy.print(F("?")); break;
+            }
+        }
+        arduboy.setCursor(0, 40);
+        arduboy.print(game.shop.selectedIndex == 6 ? F("> Next / Skip") : F("  Next / Skip"));
+        arduboy.setCursor(0, 48);
+        arduboy.print(F("UP/DOWN: ALL 6 ITEMS"));
+        arduboy.setCursor(0, 56);
+        arduboy.print(F("A BUY / B NEXT"));
+        return;
+    }
+
+    if (game.state == GameState::GameOver || game.state == GameState::Win) {
+        arduboy.setCursor(10, 8);
+        arduboy.print(game.state == GameState::Win ? F("WIN: MEMORY CLEAN") : F("GAME OVER"));
+        arduboy.setCursor(10, 24);
+        arduboy.print(game.state == GameState::Win ? F("HELLO, WORLD!") : F("OUT OF MEMORY"));
+        arduboy.setCursor(10, 40);
+        arduboy.print(F("SCORE: "));
+        arduboy.print(game.combat.playerScore);
+        arduboy.setCursor(10, 56);
+        arduboy.print(F("A/B TO TITLE"));
         return;
     }
 
     if (game.state == GameState::StageCleared) {
         arduboy.setCursor(24, 5);
         arduboy.print(F("STAGE CLEARED"));
-        arduboy.setCursor(38, 21);
+        arduboy.setCursor(10, 21);
         arduboy.print(F("SCORE: "));
         arduboy.print(game.combat.playerScore);
-        arduboy.setCursor(20, 35);
-        arduboy.print(F("TIME TO REST"));
-        arduboy.setCursor(26, 50);
-        arduboy.print(F("A/B TO CONTINUE"));
+
+        // Бонус за время
+        const uint16_t timeBonus = remainingSeconds(game.combat.stageTimer) * STAGE_TIME_BONUS_MULT;
+        arduboy.setCursor(10, 32);
+        arduboy.print(F("TIME BONUS: "));
+        arduboy.print(timeBonus);
+
+        arduboy.setCursor(20, 48);
+        arduboy.print(F("A/B -> SHOP"));
         return;
     }
 
@@ -269,12 +454,18 @@ void renderGame(Arduboy2& arduboy, const Game& game) {
     for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
         drawScoreOrb(arduboy, game.combat.scoreOrbs[i]);
     }
-    drawPlayer(arduboy, game.player);
+
+    // Hidden phases affect only rendering, not collision.
+    if (!isPlayerBlinking(game.player)) {
+        drawPlayer(arduboy, game.player);
+    }
+
     for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
         drawProjectile(arduboy, game.combat.projectiles[i]);
     }
-    drawSlot(arduboy, 0, 'A', game.player.slots[0]);
-    drawSlot(arduboy, 66, 'B', game.player.slots[1]);
+
+    // Правая колонка UI
+    drawUIColumn(arduboy, game);
 }
 
 } // пространство имён gc

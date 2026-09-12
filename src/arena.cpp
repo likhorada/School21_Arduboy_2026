@@ -16,7 +16,7 @@ const Obstacle obstacles[]
         {3, 14, 10, 10},
         {37, 8, 16, 8},
         {82, 32, 16, 10},
-        {108, 12, 8, 14},
+        {20, 32, 8, 14},
     };
 
 static_assert(sizeof(obstacles) / sizeof(obstacles[0]) == OBSTACLE_COUNT,

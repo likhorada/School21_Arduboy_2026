@@ -19,6 +19,9 @@ Game playingAt(int16_t x, int16_t y) {
     startGame(game);
     game.player.x = x;
     game.player.y = y;
+    // Movement fixtures have no waves; the real stage timer still ticks normally.
+    game.combat.spawnTimer = 0;
+    game.combat.waveCompleted = true;
     assert(!playerBlocked(x, y));
     return game;
 }
@@ -227,8 +230,8 @@ void testObstacleAabb() {
         assert(playerBlocked(normalized(left + 1, ARENA_WIDTH_FIXED), top + 1));
     }
     // При x=124 игрок через край лишь касается препятствия с x=3.
-    assert(!playerBlocked(124 * FIXED_ONE, 14 * FIXED_ONE));
-    assert(playerBlocked(124 * FIXED_ONE + 1, 14 * FIXED_ONE));
+    assert(!playerBlocked((ARENA_WIDTH - 4) * FIXED_ONE, 14 * FIXED_ONE));
+    assert(playerBlocked((ARENA_WIDTH - 4) * FIXED_ONE + 1, 14 * FIXED_ONE));
     assert(playerBlocked(ARENA_WIDTH_FIXED - 1, 14 * FIXED_ONE));
     assert(playerBlocked(0, 14 * FIXED_ONE));
     for (int y = 0; y < ARENA_HEIGHT_FIXED; y += FIXED_ONE) {
@@ -521,6 +524,8 @@ void testRandomizedInput() {
     for (unsigned run = 0; run < 4; ++run) {
         Game game = {};
         startGame(game);
+        game.combat.spawnTimer = 0;
+        game.combat.waveCompleted = true;
         game.player.slots[0].ability = run & 1 ? AbilityId::Dash : AbilityId::None;
         game.player.slots[1].ability = run & 2 ? AbilityId::Dash : AbilityId::None;
         InputFrame input = idle;

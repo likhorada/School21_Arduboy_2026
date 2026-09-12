@@ -67,6 +67,8 @@ struct Combat {
     bool waveCompleted;         // Флаг завершения волны (все враги убиты)
     bool stageCleared;          // Флаг: все волны стейджа пройдены, показать меню отдыха
     uint8_t spawnTimer;         // Кадры до спавна волны; >0 — показывать индикаторы
+    uint16_t stageTimer;        // Таймер стейджа в кадрах (60 сек)
+    uint8_t freezeFrames;
 };
 
 // Сброс: враги на стартовые позиции, пули очищены
@@ -74,7 +76,8 @@ void resetCombat(Combat& combat);
 
 // Таймеры -> пули -> автострельба. playerX/Y: левый верхний угол в 1/16 пикселя.
 // Новая пуля впервые двигается на следующем кадре, независимо от номера слота.
-void updateCombat(Combat& combat, int16_t playerX, int16_t playerY);
+void updateCombat(Combat& combat, int16_t playerX, int16_t playerY, uint8_t damage = SHOT_DAMAGE);
+void damageEnemy(Combat& combat, uint8_t index, uint8_t damage);
 
 // Спавн врагов текущей волны. playerX/Y: центр игрока (1/16 пикселя),
 // чтобы враги не появлялись прямо на нём.
@@ -92,6 +95,9 @@ uint8_t getEnemyScoreValue(EnemyType type, uint8_t variant);
 
 // Поддержание минимального количества врагов на арене
 void maintainEnemyCount(Combat& combat);
+
+// Read-only wrapped hitbox query; touching adds one movement step of tolerance.
+bool checkPlayerEnemyCollisions(const Combat& combat, int16_t playerX, int16_t playerY, bool touching = false);
 
 static_assert(sizeof(Dummy) == 4, "Dummy must fit in four bytes");
 static_assert(sizeof(Enemy) == 6, "Enemy must be 6 bytes");
