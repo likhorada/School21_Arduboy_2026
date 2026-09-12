@@ -425,6 +425,7 @@ void testAbilitiesAndCombat() {
     createScoreOrb(game.combat.scoreOrbs, 0, 0, 15);
     updateGame(game, pressB);
     assert(game.combat.playerScore == 15 && game.player.iframes == COMPACT_SHIELD_DURATION);
+    assert(game.combat.audioEvents & AUDIO_EVENT_COIN);
     assert(game.player.slots[1].cooldown == 200);
     assert(game.player.dashFrames == 0);
 
@@ -448,6 +449,7 @@ void testAbilitiesAndCombat() {
                game.combat.currentStage);
     damageEnemy(game.combat, 0, 31);
     assert(alive(game.combat) == 2);
+    assert(game.combat.audioEvents & AUDIO_EVENT_ENEMY_DEATH);
     assert(getEnemyHp(game.combat.enemies[0]) == 8 && getEnemyHp(game.combat.enemies[1]) == 8);
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
         spawnEnemy(game.combat.enemies[i], EnemyType::Splitter, 75 * 16, 50 * 16, 16,

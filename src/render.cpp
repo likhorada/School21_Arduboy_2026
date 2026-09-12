@@ -6,9 +6,6 @@
 #include "assets/mainmenu_exit.h"
 #include "assets/mainmenu_play.h"
 #include "assets/mainmenu_sound.h"
-#include "assets/soundmenu_exit.h"
-#include "assets/soundmenu_off.h"
-#include "assets/soundmenu_on.h"
 #include "stages.h"
 #include <Arduboy2.h>
 
@@ -466,12 +463,13 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   }
 
   if (game.state == GameState::SoundMenu) {
-    const uint8_t *frames[] = {
-        soundmenu_on_bitmap,
-        soundmenu_off_bitmap,
-        soundmenu_exit_bitmap,
-    };
-    arduboy.drawBitmap(0, 0, frames[game.soundMenu.selectedIndex], 128, 64, WHITE);
+    arduboy.setCursor(46, 0);
+    arduboy.print(F("SOUND"));
+    for (uint8_t i = 0; i < 3; ++i) {
+      arduboy.setCursor(37, 16 + i * 16);
+      arduboy.print(game.soundMenu.selectedIndex == i ? F("> ") : F("  "));
+      arduboy.print(i == 0 ? F("ON") : (i == 1 ? F("OFF") : F("BACK")));
+    }
     return;
   }
 

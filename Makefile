@@ -11,6 +11,7 @@ setup:
 	$(ARDUINO_CLI) core update-index
 	$(ARDUINO_CLI) core install arduino:avr@1.8.8
 	$(ARDUINO_CLI) lib install Arduboy2@6.0.0
+	$(ARDUINO_CLI) lib install ArduboyTones@1.0.3
 
 build:
 	$(ARDUINO_CLI) compile --fqbn $(FQBN) --warnings all --build-path "$(BUILD)/avr" $(SKETCH)

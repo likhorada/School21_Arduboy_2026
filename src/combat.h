@@ -5,6 +5,9 @@
 
 namespace gc {
 
+constexpr uint8_t AUDIO_EVENT_ENEMY_DEATH = 1 << 0;
+constexpr uint8_t AUDIO_EVENT_COIN = 1 << 1;
+
 // Тестовый враг: неподвижный, можно убить выстрелами, возрождается.
 // x/y: левый верхний угол в пикселях. HP и вспышка делят один байт вместо двух.
 struct Dummy {
@@ -65,8 +68,9 @@ struct Combat {
     // Прогресс по стейджам
     uint8_t currentStage;       // Текущий стейдж (0-based)
     uint8_t currentWave;        // Текущая волна в стейдже (0-based)
-    bool waveCompleted;         // Флаг завершения волны (все враги убиты)
-    bool stageCleared;          // Флаг: все волны стейджа пройдены, показать меню отдыха
+    uint8_t waveCompleted : 1;  // Все враги волны убиты
+    uint8_t stageCleared : 1;   // Все волны этапа пройдены
+    uint8_t audioEvents : 2;    // Одно-кадровые события для SFX
     uint8_t spawnTimer;         // Кадры до спавна волны; >0 — показывать индикаторы
     uint16_t stageTimer;        // Таймер стейджа в кадрах (60 сек)
     uint8_t freezeFrames;

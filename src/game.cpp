@@ -56,7 +56,10 @@ void activateAbility(Game& game, ActiveSlot& slot) {
     case AbilityId::Compact:
         for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
             ScoreOrb& orb = game.combat.scoreOrbs[i];
-            if (orb.lifetime) game.combat.playerScore += orb.value;
+            if (orb.lifetime) {
+                game.combat.playerScore += orb.value;
+                game.combat.audioEvents |= AUDIO_EVENT_COIN;
+            }
             orb.lifetime = 0;
         }
         if (player.iframes < COMPACT_SHIELD_DURATION) player.iframes = COMPACT_SHIELD_DURATION;
@@ -212,6 +215,7 @@ void updateShop(Game& game, const InputFrame& input) {
 }
 
 void updateGame(Game& game, const InputFrame& input) {
+    game.combat.audioEvents = 0;
     // Удержание A+B на полсекунды ставит паузу, повторное удержание снимает её.
     if (input.holdA && input.holdB) {
         if (game.pauseHoldFrames < PAUSE_HOLD_FRAMES) ++game.pauseHoldFrames;

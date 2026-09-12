@@ -1,10 +1,68 @@
 #include <Arduboy2.h>
+#include <ArduboyTones.h>
+#include <ArduboyTonesPitches.h>
 
 #include "game.h"
 #include "render.h"
 
 Arduboy2 arduboy;
 gc::Game game = {};
+ArduboyTones tones(arduboy.audio.enabled);
+
+const uint16_t menuMusic[] PROGMEM = {
+    NOTE_E5, 150, NOTE_B4, 150, NOTE_G4, 150, NOTE_E4, 150,
+    NOTE_D5, 150, NOTE_A4, 150, NOTE_F4, 150, NOTE_D4, 150,
+    NOTE_C5, 150, NOTE_G4, 150, NOTE_E4, 150, NOTE_C4, 150,
+    NOTE_B4, 150, NOTE_D4, 150, NOTE_G4, 150, NOTE_B4, 150,
+    TONES_REPEAT
+};
+
+const uint16_t coinSound[] PROGMEM = {
+    NOTE_C6, 35, NOTE_E6, 55, TONES_END
+};
+const uint16_t enemyDeathSound[] PROGMEM = {
+    NOTE_E4, 45, NOTE_C4, 70, TONES_END
+};
+const uint16_t playerHurtSound[] PROGMEM = {
+    NOTE_E3, 60, NOTE_C3, 100, TONES_END
+};
+
+bool musicPlaying = false;
+
+void updateAudio(uint8_t previousHp) {
+    if (!game.soundEnabled) {
+        if (tones.playing()) tones.noTone();
+        musicPlaying = false;
+        return;
+    }
+    if (game.player.hp < previousHp) {
+        tones.tones(playerHurtSound);
+        musicPlaying = false;
+        return;
+    }
+    if (game.combat.audioEvents & gc::AUDIO_EVENT_ENEMY_DEATH) {
+        tones.tones(enemyDeathSound);
+        musicPlaying = false;
+        return;
+    }
+    if (game.combat.audioEvents & gc::AUDIO_EVENT_COIN) {
+        tones.tones(coinSound);
+        musicPlaying = false;
+        return;
+    }
+
+    const bool menu = game.state == gc::GameState::Menu ||
+                      game.state == gc::GameState::About ||
+                      game.state == gc::GameState::SoundMenu ||
+                      game.state == gc::GameState::Shop;
+    if (menu && !tones.playing()) {
+        tones.tones(menuMusic);
+        musicPlaying = true;
+    } else if (!menu && musicPlaying) {
+        tones.noTone();
+        musicPlaying = false;
+    }
+}
 
 // Сохраняем штатную инициализацию, USB и режим восстановления Arduboy2.
 void setup() {
@@ -30,12 +88,14 @@ void loop() {
         arduboy.pressed(B_BUTTON),
     };
     const uint8_t previousSoundEnabled = game.soundEnabled;
+    const uint8_t previousHp = game.player.hp;
     gc::updateGame(game, input);
     if (game.soundEnabled != previousSoundEnabled) {
         if (game.soundEnabled) arduboy.audio.on();
         else arduboy.audio.off();
         arduboy.audio.saveOnOff();
     }
+    updateAudio(previousHp);
     gc::renderGame(arduboy, game);
     arduboy.display();
 }

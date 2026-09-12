@@ -198,6 +198,7 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
   const uint8_t collectedScore =
       collectOrbs(combat.scoreOrbs, originX, originY);
   combat.playerScore += collectedScore;
+  if (collectedScore) combat.audioEvents |= AUDIO_EVENT_COIN;
   checkWaveCompletion(combat);
   if (combat.stageCleared)
     return;
@@ -413,6 +414,7 @@ void damageEnemy(Combat &combat, uint8_t index, uint8_t damage) {
   const uint8_t size = enemy.splitLevel;
   const int16_t x = enemy.x, y = enemy.y;
   const uint8_t value = getEnemyScoreValue(type, size);
+  combat.audioEvents |= AUDIO_EVENT_ENEMY_DEATH;
   bool freeOrb = false;
   for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i)
     freeOrb |= combat.scoreOrbs[i].lifetime == 0;
