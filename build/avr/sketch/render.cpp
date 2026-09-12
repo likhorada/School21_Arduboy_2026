@@ -1,3 +1,4 @@
+#line 1 "/home/Hermip/Documents/study/School 21/School21_Arduboy_2026/src/render.cpp"
 #include "render.h"
 
 #include <Arduboy2.h>

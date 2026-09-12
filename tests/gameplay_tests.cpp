@@ -543,6 +543,11 @@ void testRandomizedInput() {
             previousB = heldB;
             const Player before = game.player;
             updateGame(game, input);
+            // Новое состояние: после прохождения стейджа игра ждёт нажатия A/B.
+            if (game.state == GameState::StageCleared) {
+                const InputFrame continuePressed = {0, 0, true, false};
+                updateGame(game, continuePressed);
+            }
             assert(game.state == GameState::Playing);
             assertSafe(game);
             assert(!referenceBlocked(game.player.x, game.player.y));

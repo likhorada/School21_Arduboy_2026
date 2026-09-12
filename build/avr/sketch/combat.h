@@ -1,3 +1,4 @@
+#line 1 "/home/Hermip/Documents/study/School 21/School21_Arduboy_2026/src/combat.h"
 #pragma once
 
 #include "config.h"

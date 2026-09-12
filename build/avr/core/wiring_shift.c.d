@@ -1,0 +1,6 @@
+/home/Hermip/Documents/study/School\ 21/School21_Arduboy_2026/build/avr/core/wiring_shift.c.o: \
+ /home/Hermip/.arduino15/packages/arduino/hardware/avr/1.8.8/cores/arduino/wiring_shift.c \
+ /home/Hermip/.arduino15/packages/arduino/hardware/avr/1.8.8/cores/arduino/wiring_private.h \
+ /home/Hermip/.arduino15/packages/arduino/hardware/avr/1.8.8/cores/arduino/Arduino.h \
+ /home/Hermip/.arduino15/packages/arduino/hardware/avr/1.8.8/cores/arduino/binary.h \
+ /home/Hermip/.arduino15/packages/arduino/hardware/avr/1.8.8/variants/leonardo/pins_arduino.h
