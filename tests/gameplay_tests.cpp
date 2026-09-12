@@ -22,14 +22,14 @@ Game playingAt(int16_t x, int16_t y) {
     // Movement fixtures have no waves; the real stage timer still ticks normally.
     game.combat.spawnTimer = 0;
     game.combat.waveCompleted = true;
-    assert(!playerBlocked(x, y));
+    assert(!playerBlocked(game.combat.currentStage, x, y));
     return game;
 }
 
 void assertSafe(const Game& game) {
     assert(game.player.x >= 0 && game.player.x < ARENA_WIDTH_FIXED);
     assert(game.player.y >= 0 && game.player.y < ARENA_HEIGHT_FIXED);
-    assert(!playerBlocked(game.player.x, game.player.y));
+    assert(!playerBlocked(game.combat.currentStage, game.player.x, game.player.y));
 }
 
 void assertSamePlayer(const Player& actual, const Player& expected) {
@@ -187,8 +187,8 @@ void testWraps() {
 // Независимая проверка: сдвигаем препятствия, а не координаты игрока.
 bool referenceBlocked(int x, int y) {
     const int size = PLAYER_SIZE * FIXED_ONE;
-    for (unsigned i = 0; i < OBSTACLE_COUNT; ++i) {
-        const Obstacle obstacle = readObstacle(i);
+    for (unsigned i = 0; i < getStageObstacleCount(0); ++i) {
+        const Obstacle obstacle = readObstacle(0, i);
         for (int copyX = -1; copyX <= 1; ++copyX) {
             for (int copyY = -1; copyY <= 1; ++copyY) {
                 const int left = obstacle.x * FIXED_ONE + copyX * ARENA_WIDTH_FIXED;
@@ -204,42 +204,48 @@ bool referenceBlocked(int x, int y) {
 }
 
 void testObstacleAabb() {
-    assert(OBSTACLE_COUNT == 4);
-    const Obstacle seamObstacle = readObstacle(0);
+    assert(getStageObstacleCount(0) == 4);
+    const Obstacle seamObstacle = readObstacle(0, 0);
     assert(seamObstacle.x == 3 && seamObstacle.y == 14);
-    const Obstacle invalid = readObstacle(OBSTACLE_COUNT);
+    // Раскладка второго стейджа отличается от первой и тоже читается.
+    assert(getStageObstacleCount(1) == 4);
+    const Obstacle stage2First = readObstacle(1, 0);
+    assert(stage2First.x == 48 && stage2First.y == 4);
+    assert(getStageObstacleCount(99) == 0);
+    assert(readObstacle(99, 0).x == 0 && readObstacle(1, 99).width == 0);
+    const Obstacle invalid = readObstacle(0, getStageObstacleCount(0));
     assert(invalid.x == 0 && invalid.y == 0 && invalid.width == 0 && invalid.height == 0);
-    for (unsigned i = 0; i < OBSTACLE_COUNT; ++i) {
-        const Obstacle obstacle = readObstacle(i);
+    for (unsigned i = 0; i < getStageObstacleCount(0); ++i) {
+        const Obstacle obstacle = readObstacle(0, i);
         const int left = (static_cast<int>(obstacle.x) - PLAYER_SIZE) * FIXED_ONE;
         const int right = (obstacle.x + obstacle.width) * FIXED_ONE;
         const int top = (static_cast<int>(obstacle.y) - PLAYER_SIZE) * FIXED_ONE;
         const int bottom = (obstacle.y + obstacle.height) * FIXED_ONE;
         const int x = obstacle.x * FIXED_ONE;
         const int y = obstacle.y * FIXED_ONE;
-        assert(playerBlocked(x, y));
-        assert(!playerBlocked(normalized(left, ARENA_WIDTH_FIXED), y));
-        assert(playerBlocked(normalized(left + 1, ARENA_WIDTH_FIXED), y));
-        assert(!playerBlocked(right, y));
-        assert(playerBlocked(right - 1, y));
-        assert(!playerBlocked(x, top));
-        assert(playerBlocked(x, top + 1));
-        assert(!playerBlocked(x, bottom));
-        assert(playerBlocked(x, bottom - 1));
-        assert(!playerBlocked(normalized(left, ARENA_WIDTH_FIXED), top));
-        assert(playerBlocked(normalized(left + 1, ARENA_WIDTH_FIXED), top + 1));
+        assert(playerBlocked(0, x, y));
+        assert(!playerBlocked(0, normalized(left, ARENA_WIDTH_FIXED), y));
+        assert(playerBlocked(0, normalized(left + 1, ARENA_WIDTH_FIXED), y));
+        assert(!playerBlocked(0, right, y));
+        assert(playerBlocked(0, right - 1, y));
+        assert(!playerBlocked(0, x, top));
+        assert(playerBlocked(0, x, top + 1));
+        assert(!playerBlocked(0, x, bottom));
+        assert(playerBlocked(0, x, bottom - 1));
+        assert(!playerBlocked(0, normalized(left, ARENA_WIDTH_FIXED), top));
+        assert(playerBlocked(0, normalized(left + 1, ARENA_WIDTH_FIXED), top + 1));
     }
     // При x=124 игрок через край лишь касается препятствия с x=3.
-    assert(!playerBlocked((ARENA_WIDTH - 4) * FIXED_ONE, 14 * FIXED_ONE));
-    assert(playerBlocked((ARENA_WIDTH - 4) * FIXED_ONE + 1, 14 * FIXED_ONE));
-    assert(playerBlocked(ARENA_WIDTH_FIXED - 1, 14 * FIXED_ONE));
-    assert(playerBlocked(0, 14 * FIXED_ONE));
+    assert(!playerBlocked(0, (ARENA_WIDTH - 4) * FIXED_ONE, 14 * FIXED_ONE));
+    assert(playerBlocked(0, (ARENA_WIDTH - 4) * FIXED_ONE + 1, 14 * FIXED_ONE));
+    assert(playerBlocked(0, ARENA_WIDTH_FIXED - 1, 14 * FIXED_ONE));
+    assert(playerBlocked(0, 0, 14 * FIXED_ONE));
     for (int y = 0; y < ARENA_HEIGHT_FIXED; y += FIXED_ONE) {
         for (int x = 0; x < ARENA_WIDTH_FIXED; x += FIXED_ONE) {
             const int fractions[] = {0, 1, FIXED_ONE - 1};
             for (unsigned fx = 0; fx < 3; ++fx) {
                 for (unsigned fy = 0; fy < 3; ++fy) {
-                    assert(playerBlocked(x + fractions[fx], y + fractions[fy]) ==
+                    assert(playerBlocked(0, x + fractions[fx], y + fractions[fy]) ==
                            referenceBlocked(x + fractions[fx], y + fractions[fy]));
                 }
             }
@@ -249,8 +255,8 @@ void testObstacleAabb() {
 
 void testSlidingAndDashCollision() {
     // Подходим с четырёх сторон, включая переход через край к x=3.
-    for (unsigned i = 0; i < OBSTACLE_COUNT; ++i) {
-        const Obstacle obstacle = readObstacle(i);
+    for (unsigned i = 0; i < getStageObstacleCount(0); ++i) {
+        const Obstacle obstacle = readObstacle(0, i);
         for (unsigned side = 0; side < 4; ++side) {
             const bool horizontal = side < 2;
             const int8_t direction = side % 2 == 0 ? 1 : -1;

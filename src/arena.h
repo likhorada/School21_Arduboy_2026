@@ -11,17 +11,22 @@ struct Obstacle {
     uint8_t height;
 };
 
-constexpr uint8_t OBSTACLE_COUNT = 4;
+// Препятствия заданы данными по стейджам (по образцу волн в stages.h).
+// Вне диапазона стейджа/индекса возвращается нулевой прямоугольник.
 
-// Читаем один прямоугольник из flash, не копируя всю карту в SRAM. Размеры в пикселях.
-Obstacle readObstacle(uint8_t index);
+// Количество препятствий в стейдже; вне диапазона — 0.
+uint8_t getStageObstacleCount(uint8_t stage);
+
+// Читаем один прямоугольник стейджа из flash, не копируя всю карту в SRAM.
+// Размеры в пикселях.
+Obstacle readObstacle(uint8_t stage, uint8_t index);
 
 // Возвращаем координату в [0, extent); вход должен быть в [-extent, 2*extent).
 int16_t wrapCoordinate(int16_t coordinate, int16_t extent);
 
 // Проверяем весь прямоугольник игрока, в том числе часть за краем арены.
 // x/y: левый верхний угол внутри арены, в единицах 1/16 пикселя.
-bool playerBlocked(int16_t x, int16_t y);
+bool playerBlocked(uint8_t stage, int16_t x, int16_t y);
 
 // Кратчайшее смещение с учётом краёв: от 126 до 2 при ширине 128 получается +4.
 // На ровно половине ширины сохраняем знак (to - from); обе точки внутри арены.
@@ -34,7 +39,8 @@ int16_t shortestDelta(int16_t from, int16_t to, int16_t extent);
 bool segmentHitsBox(int16_t x, int16_t y, int16_t dx, int16_t dy,
                     const Obstacle& box);
 
-// Проверяем отрезок против всех стен. Прицеливание и пули используют одну геометрию.
-bool shotBlocked(int16_t x, int16_t y, int16_t dx, int16_t dy);
+// Проверяем отрезок против всех стен стейджа. Прицеливание и пули используют
+// одну геометрию.
+bool shotBlocked(uint8_t stage, int16_t x, int16_t y, int16_t dx, int16_t dy);
 
 } // пространство имён gc

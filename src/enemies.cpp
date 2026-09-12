@@ -4,15 +4,16 @@
 namespace gc {
 namespace {
 
-// Проверка коллизий врага (хитбокс 12x6, центр в centerX, centerY) с препятствиями.
-// Возвращает true, если позиция занята стеной.
-bool enemyHitsObstacle(int16_t centerX, int16_t centerY) {
+// Проверка коллизий врага (хитбокс 12x6, центр в centerX, centerY) с
+// препятствиями текущего стейджа. Возвращает true, если позиция занята стеной.
+bool enemyHitsObstacle(uint8_t stage, int16_t centerX, int16_t centerY) {
     if (centerX < ENEMY_HALF_WIDTH * FIXED_ONE ||
         centerX > ARENA_WIDTH_FIXED - ENEMY_HALF_WIDTH * FIXED_ONE ||
         centerY < ENEMY_HALF_HEIGHT * FIXED_ONE ||
         centerY > ARENA_HEIGHT_FIXED - ENEMY_HALF_HEIGHT * FIXED_ONE) return true;
-    for (uint8_t i = 0; i < OBSTACLE_COUNT; ++i) {
-        const Obstacle obs = readObstacle(i);
+    const uint8_t count = getStageObstacleCount(stage);
+    for (uint8_t i = 0; i < count; ++i) {
+        const Obstacle obs = readObstacle(stage, i);
         const int16_t dx = obs.x * FIXED_ONE + obs.width * FIXED_ONE / 2 - centerX;
         const int16_t dy = obs.y * FIXED_ONE + obs.height * FIXED_ONE / 2 - centerY;
         const int16_t width = ENEMY_HALF_WIDTH * FIXED_ONE + obs.width * FIXED_ONE / 2;
@@ -37,7 +38,7 @@ bool pointHitsEnemy(int16_t px, int16_t py, int16_t ex, int16_t ey) {
 }
 
 // Простое движение к игроку с проверкой коллизий и скольжением вдоль стен
-void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t speed) {
+void moveTowardsPlayer(uint8_t stage, Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t speed) {
     const int16_t oldX = enemy.x;
     const int16_t oldY = enemy.y;
     const int16_t dx = playerX - enemy.x;
@@ -68,11 +69,11 @@ void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t s
     
     // Пробуем двигаться по X
     const int16_t newX = enemy.x + vx;
-    const bool blockedX = enemyHitsObstacle(newX, enemy.y);
+    const bool blockedX = enemyHitsObstacle(stage, newX, enemy.y);
     
     // Пробуем двигаться по Y
     const int16_t newY = enemy.y + vy;
-    const bool blockedY = enemyHitsObstacle(enemy.x, newY);
+    const bool blockedY = enemyHitsObstacle(stage, enemy.x, newY);
     
     if (!blockedX) {
         enemy.x = newX;
@@ -84,16 +85,16 @@ void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t s
     // Если оба направления заблокированы, пробуем скольжение перпендикулярно стене
     if (blockedX && blockedY && (vx != 0 || vy != 0)) {
         const int16_t slideX = enemy.x + vy;
-        if (!enemyHitsObstacle(slideX, enemy.y)) {
+        if (!enemyHitsObstacle(stage, slideX, enemy.y)) {
             enemy.x = slideX;
         } else {
             const int16_t slideY = enemy.y + vx;
-            if (!enemyHitsObstacle(enemy.x, slideY)) {
+            if (!enemyHitsObstacle(stage, enemy.x, slideY)) {
                 enemy.y = slideY;
             }
         }
     }
-    if (enemyOverlapsPlayer(enemy.x, enemy.y, playerX, playerY) || enemyHitsObstacle(enemy.x, enemy.y)) {
+    if (enemyOverlapsPlayer(enemy.x, enemy.y, playerX, playerY) || enemyHitsObstacle(stage, enemy.x, enemy.y)) {
         enemy.x = oldX;
         enemy.y = oldY;
     }
@@ -101,8 +102,8 @@ void moveTowardsPlayer(Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t s
 
 } // anonymous namespace
 
-bool enemyPositionValid(int16_t x, int16_t y) {
-    return !enemyHitsObstacle(x, y);
+bool enemyPositionValid(uint8_t stage, int16_t x, int16_t y) {
+    return !enemyHitsObstacle(stage, x, y);
 }
 
 bool enemyOverlapsPlayer(int16_t x, int16_t y, int16_t px, int16_t py, bool touching) {
@@ -116,11 +117,11 @@ bool enemyOverlapsPlayer(int16_t x, int16_t y, int16_t px, int16_t py, bool touc
 }
 
 // Спавн врага
-void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t variant) {
+void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t variant, uint8_t stage) {
     enemy.x = x;
     enemy.y = y;
     enemy.splitLevel = 0;
-    if (!enemyPositionValid(x, y)) {
+    if (!enemyPositionValid(stage, x, y)) {
         setEnemyTypeAndHp(enemy, EnemyType::None, 0);
         return;
     }
@@ -152,7 +153,7 @@ void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t vari
 
 // Обновление всех врагов
 void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
-                   int16_t playerX, int16_t playerY, uint32_t& randomState) {
+                   int16_t playerX, int16_t playerY, uint8_t stage, uint32_t& randomState) {
     (void)randomState; // Не используется пока
     
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
@@ -188,7 +189,7 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
             break;
         }
         
-        moveTowardsPlayer(enemy, playerX, playerY, speed);
+        moveTowardsPlayer(stage, enemy, playerX, playerY, speed);
     }
     
     // Расталкивание врагов друг от друга
@@ -218,13 +219,13 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
                 
                 const int16_t newX1 = enemy1.x - pushX;
                 const int16_t newY1 = enemy1.y - pushY;
-                if (!enemyHitsObstacle(newX1, enemy1.y) && !enemyOverlapsPlayer(newX1, enemy1.y, playerX, playerY)) enemy1.x = newX1;
-                if (!enemyHitsObstacle(enemy1.x, newY1) && !enemyOverlapsPlayer(enemy1.x, newY1, playerX, playerY)) enemy1.y = newY1;
+                if (!enemyHitsObstacle(stage, newX1, enemy1.y) && !enemyOverlapsPlayer(newX1, enemy1.y, playerX, playerY)) enemy1.x = newX1;
+                if (!enemyHitsObstacle(stage, enemy1.x, newY1) && !enemyOverlapsPlayer(enemy1.x, newY1, playerX, playerY)) enemy1.y = newY1;
                 
                 const int16_t newX2 = enemy2.x + pushX;
                 const int16_t newY2 = enemy2.y + pushY;
-                if (!enemyHitsObstacle(newX2, enemy2.y) && !enemyOverlapsPlayer(newX2, enemy2.y, playerX, playerY)) enemy2.x = newX2;
-                if (!enemyHitsObstacle(enemy2.x, newY2) && !enemyOverlapsPlayer(enemy2.x, newY2, playerX, playerY)) enemy2.y = newY2;
+                if (!enemyHitsObstacle(stage, newX2, enemy2.y) && !enemyOverlapsPlayer(newX2, enemy2.y, playerX, playerY)) enemy2.x = newX2;
+                if (!enemyHitsObstacle(stage, enemy2.x, newY2) && !enemyOverlapsPlayer(enemy2.x, newY2, playerX, playerY)) enemy2.y = newY2;
             }
         }
     }

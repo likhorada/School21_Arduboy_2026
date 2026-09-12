@@ -12,7 +12,8 @@ constexpr uint8_t FIXED_ONE = 16;
 constexpr int16_t ARENA_WIDTH_FIXED = ARENA_WIDTH * FIXED_ONE;
 constexpr int16_t ARENA_HEIGHT_FIXED = ARENA_HEIGHT * FIXED_ONE;
 
-constexpr uint8_t FRAME_DURATION_MS = 16; // 62,5 кадра/с, если укладываемся в бюджет.
+constexpr uint8_t FRAME_DURATION_MS =
+    16; // 62,5 кадра/с, если укладываемся в бюджет.
 constexpr uint8_t PLAYER_SIZE = 7;
 constexpr uint8_t PLAYER_START_X = 60;
 constexpr uint8_t PLAYER_START_Y = 25;
@@ -34,19 +35,24 @@ constexpr uint8_t DUMMY_MAX_HP = 3;
 constexpr uint8_t DUMMY_RESPAWN_FRAMES = 125; // 2 секунды после смерти.
 constexpr uint8_t HIT_FLASH_FRAMES = 6;
 constexpr uint8_t MAX_PROJECTILES = 4;
-constexpr uint8_t SHOT_INTERVAL = 25; // 0,4 секунды между успешными выстрелами.
+constexpr uint8_t SHOT_INTERVAL = 15; // 0,4 секунды между подходами очереди.
+constexpr uint8_t SHOT_BURST_COUNT = 2; // Пуль за подход (1 = обычный одиночный).
+constexpr uint8_t SHOT_BURST_DELAY = 4; // Пауза между пулями очередью.
 constexpr uint8_t SHOT_DAMAGE = 1;
 constexpr uint8_t SHOT_RANGE = 48; // Пиксели от центра игрока до центра цели.
 constexpr int16_t SHOT_RANGE_FIXED = SHOT_RANGE * FIXED_ONE;
 constexpr uint8_t PROJECTILE_SPEED = 2 * FIXED_ONE;
 constexpr uint8_t PROJECTILE_LIFETIME = 64;
-constexpr uint8_t PROJECTILE_STEPS = (PROJECTILE_SPEED + FIXED_ONE - 1) / FIXED_ONE;
-// Проверяем только короткий путь. Два кадра запаса учитывают округление скорости.
+constexpr uint8_t PROJECTILE_STEPS =
+    (PROJECTILE_SPEED + FIXED_ONE - 1) / FIXED_ONE;
+// Проверяем только короткий путь. Два кадра запаса учитывают округление
+// скорости.
 constexpr uint8_t AIM_PREVIEW_FRAMES =
     (SHOT_RANGE_FIXED + PROJECTILE_SPEED - 1) / PROJECTILE_SPEED + 2;
 
 static_assert(WALK_SPEED > 0 && WALK_SPEED <= DASH_SPEED, "Invalid walk speed");
-static_assert(DASH_SPEED <= 127 && DASH_DURATION > 0, "Invalid dash parameters");
+static_assert(DASH_SPEED <= 127 && DASH_DURATION > 0,
+              "Invalid dash parameters");
 static_assert(DASH_COOLDOWN >= DASH_DURATION, "Cooldown must cover the dash");
 static_assert(PLAYER_SIZE < ARENA_HEIGHT && PLAYER_SIZE < ARENA_WIDTH,
               "Player must fit within one period of the arena");
@@ -59,23 +65,29 @@ static_assert(PROJECTILE_LIFETIME >= AIM_PREVIEW_FRAMES && SHOT_DAMAGE > 0,
 static_assert(DUMMY_COUNT <= 8, "Target rejection mask has only eight bits");
 static_assert(DUMMY_SIZE <= ARENA_WIDTH / 2 && DUMMY_SIZE <= ARENA_HEIGHT / 2,
               "Segment collision expects boxes no larger than half the arena");
-// Упаковка не должна молча обрезать HP или длительность вспышки при смене настроек.
+// Упаковка не должна молча обрезать HP или длительность вспышки при смене
+// настроек.
 static_assert(DUMMY_MAX_HP > 0 && DUMMY_MAX_HP <= 3, "Packed HP uses two bits");
 static_assert(HIT_FLASH_FRAMES <= 7, "Packed hit flash uses three bits");
+static_assert(SHOT_BURST_COUNT >= 1 && SHOT_BURST_DELAY > 0 &&
+                  SHOT_BURST_DELAY < SHOT_INTERVAL,
+              "Burst bullets must be quicker than the full reload");
 
 // === ИГРОВЫЕ КОНСТАНТЫ ===
 // HP и неуязвимость
 constexpr uint8_t PLAYER_BASE_MAX_HP = 4;
 constexpr uint8_t PLAYER_MAX_HP_CAP = 6;
-constexpr uint8_t IFRAME_DURATION = 60;      // 1 секунда при 62.5 FPS
-constexpr uint8_t BLINK_INTERVAL = 4;        // Мигание каждые 4 кадра
+constexpr uint8_t IFRAME_DURATION = 60; // 1 секунда при 62.5 FPS
+constexpr uint8_t BLINK_INTERVAL = 4;   // Мигание каждые 4 кадра
 
 // Стейдж таймер
 constexpr uint16_t STAGE_TIME_SECONDS = 60;
-constexpr uint16_t STAGE_TIME_FRAMES = uint32_t(STAGE_TIME_SECONDS) * 1000 / FRAME_DURATION_MS;
-static_assert(STAGE_TIME_FRAMES == 3750, "Stage timer must be exactly 60 seconds");
+constexpr uint16_t STAGE_TIME_FRAMES =
+    uint32_t(STAGE_TIME_SECONDS) * 1000 / FRAME_DURATION_MS;
+static_assert(STAGE_TIME_FRAMES == 3750,
+              "Stage timer must be exactly 60 seconds");
 inline uint8_t remainingSeconds(uint16_t frames) {
-    return uint32_t(frames) * FRAME_DURATION_MS / 1000;
+  return uint32_t(frames) * FRAME_DURATION_MS / 1000;
 }
 constexpr uint16_t PASSIVE_PRICE = 100;
 constexpr uint16_t ACTIVE_PRICE = 200;
@@ -97,4 +109,4 @@ constexpr uint16_t STAGE_TIME_BONUS_MULT = 100;
 constexpr uint8_t SHOP_PASSIVE_CHOICES = 3;
 constexpr uint8_t SHOP_ACTIVE_CHOICES = 3;
 
-} // пространство имён gc
+} // namespace gc

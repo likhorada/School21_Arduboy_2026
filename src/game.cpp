@@ -49,7 +49,7 @@ void activateAbility(Game& game, ActiveSlot& slot) {
 }
 
 bool movementBlocked(Game& game, int16_t x, int16_t y) {
-    if (playerBlocked(x, y)) return true;
+    if (playerBlocked(game.combat.currentStage, x, y)) return true;
     if (!checkPlayerEnemyCollisions(game.combat, x, y)) return false;
     damagePlayer(game.player);
     return true;
@@ -117,6 +117,7 @@ void applyShopChoice(Game& game) {
         game.combat.stageTimer = STAGE_TIME_FRAMES;
         game.combat.spawnTimer = SPAWN_DELAY_FRAMES;
         game.combat.freezeFrames = 0;
+        game.combat.burstShots = 0;
         game.player.dashFrames = 0;
         game.state = GameState::Playing;
         return;
@@ -209,6 +210,8 @@ void updateGame(Game& game, const InputFrame& input) {
     if (checkPlayerEnemyCollisions(game.combat, player.x, player.y, true)) damagePlayer(player);
     if (!player.hp) game.state = GameState::GameOver;
     else if (game.combat.stageCleared) {
+        // Полное восстановление HP на паузе между стейджами.
+        player.hp = player.maxHp;
         game.state = game.combat.currentStage + 1 == TOTAL_STAGES ? GameState::Win : GameState::StageCleared;
     }
 }

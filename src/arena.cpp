@@ -2,13 +2,24 @@
 
 #ifdef __AVR__
 #include <avr/pgmspace.h>
+#else
+#ifndef PROGMEM
+#define PROGMEM
+#endif
+#ifndef pgm_read_byte
+#define pgm_read_byte(addr) (*(const uint8_t *)(addr))
+#endif
+#ifndef pgm_read_ptr
+#define pgm_read_ptr(addr) (*(void const *const *)(addr))
+#endif
 #endif
 
 namespace gc {
 namespace {
 
-// Препятствия на арене. На AVR хранятся в flash (PROGMEM), не в SRAM.
-const Obstacle obstacles[]
+// Препятствия на арене по стейджам. На AVR хранятся в flash (PROGMEM),
+// не в SRAM. Стейдж 1 — текущая карта, стейдж 2 — другая раскладка.
+const Obstacle stage1Obstacles[]
 #ifdef __AVR__
     PROGMEM
 #endif
@@ -19,8 +30,36 @@ const Obstacle obstacles[]
         {20, 32, 8, 14},
     };
 
-static_assert(sizeof(obstacles) / sizeof(obstacles[0]) == OBSTACLE_COUNT,
-              "Obstacle count does not match the map");
+const Obstacle stage2Obstacles[]
+#ifdef __AVR__
+    PROGMEM
+#endif
+    = {
+        {48, 4, 16, 8},
+        {28, 24, 8, 16},
+        {78, 30, 16, 12},
+        {40, 48, 20, 8},
+    };
+
+const Obstacle *const
+#ifdef __AVR__
+    PROGMEM
+#endif
+    allObstacleSets[] = {stage1Obstacles, stage2Obstacles};
+
+const uint8_t
+#ifdef __AVR__
+    PROGMEM
+#endif
+    obstacleCounts[] = {4, 4};
+
+constexpr uint8_t ARENA_LAYOUTS =
+    sizeof(allObstacleSets) / sizeof(allObstacleSets[0]);
+
+static_assert(sizeof(stage1Obstacles) / sizeof(stage1Obstacles[0]) == 4,
+              "Stage 1 obstacle table does not match its count");
+static_assert(sizeof(stage2Obstacles) / sizeof(stage2Obstacles[0]) == 4,
+              "Stage 2 obstacle table does not match its count");
 
 // Проверка пересечения по одной оси (X или Y) с учётом перехода через край.
 // Игрок размером PLAYER_SIZE может быть на стыке границы арены.
@@ -34,18 +73,32 @@ bool overlapsAxis(int16_t position, uint8_t start, uint8_t length, int16_t exten
 
 } // внутренние функции модуля
 
-// На AVR читаем из flash, в тестах на компьютере из обычной памяти.
-Obstacle readObstacle(uint8_t index) {
-    if (index >= OBSTACLE_COUNT) {
-        return {};
+// Количество препятствий в стейдже; вне диапазона — 0.
+uint8_t getStageObstacleCount(uint8_t stage) {
+    if (stage >= ARENA_LAYOUTS) {
+        return 0;
     }
 #ifdef __AVR__
-    Obstacle result;
-    memcpy_P(&result, &obstacles[index], sizeof(result));
-    return result;
+    return pgm_read_byte(&obstacleCounts[stage]);
 #else
-    return obstacles[index];
+    return obstacleCounts[stage];
 #endif
+}
+
+// На AVR читаем из flash, в тестах на компьютере из обычной памяти.
+Obstacle readObstacle(uint8_t stage, uint8_t index) {
+    Obstacle result = {};
+    if (stage >= ARENA_LAYOUTS || index >= getStageObstacleCount(stage)) {
+        return result;
+    }
+#ifdef __AVR__
+    const Obstacle *table =
+        reinterpret_cast<const Obstacle *>(pgm_read_ptr(&allObstacleSets[stage]));
+    memcpy_P(&result, &table[index], sizeof(result));
+#else
+    result = allObstacleSets[stage][index];
+#endif
+    return result;
 }
 
 // Оборачиваем координату через границу арены (тор).
@@ -59,10 +112,11 @@ int16_t wrapCoordinate(int16_t coordinate, int16_t extent) {
     return coordinate;
 }
 
-// Проверяем, пересекается ли игрок с препятствиями на позиции (x, y).
-bool playerBlocked(int16_t x, int16_t y) {
-    for (uint8_t i = 0; i < OBSTACLE_COUNT; ++i) {
-        const Obstacle obstacle = readObstacle(i);
+// Проверяем, пересекается ли игрок с препятствиями стейджа на позиции (x, y).
+bool playerBlocked(uint8_t stage, int16_t x, int16_t y) {
+    const uint8_t count = getStageObstacleCount(stage);
+    for (uint8_t i = 0; i < count; ++i) {
+        const Obstacle obstacle = readObstacle(stage, i);
         if (overlapsAxis(x, obstacle.x, obstacle.width, ARENA_WIDTH_FIXED) &&
             overlapsAxis(y, obstacle.y, obstacle.height, ARENA_HEIGHT_FIXED)) {
             return true;
@@ -139,10 +193,11 @@ bool segmentHitsBox(int16_t x, int16_t y, int16_t dx, int16_t dy,
     return !allPositive && !allNegative;
 }
 
-// Проверяем, попадает ли отрезок (x,y)→(x+dx, y+dy) в препятствия.
-bool shotBlocked(int16_t x, int16_t y, int16_t dx, int16_t dy) {
-    for (uint8_t i = 0; i < OBSTACLE_COUNT; ++i) {
-        if (segmentHitsBox(x, y, dx, dy, readObstacle(i))) {
+// Проверяем, попадает ли отрезок (x,y)→(x+dx, y+dy) в препятствия стейджа.
+bool shotBlocked(uint8_t stage, int16_t x, int16_t y, int16_t dx, int16_t dy) {
+    const uint8_t count = getStageObstacleCount(stage);
+    for (uint8_t i = 0; i < count; ++i) {
+        if (segmentHitsBox(x, y, dx, dy, readObstacle(stage, i))) {
             return true;
         }
     }

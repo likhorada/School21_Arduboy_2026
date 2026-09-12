@@ -50,7 +50,7 @@ int main() {
             for (uint8_t i = 0; i < getWaveEnemyCount(stage, wave); ++i) {
                 uint8_t x, y;
                 getSpawnPixel(stage, wave, i, x, y);
-                assert(enemyPositionValid(x * FIXED_ONE, y * FIXED_ONE));
+                assert(enemyPositionValid(stage, x * FIXED_ONE, y * FIXED_ONE));
                 for (int8_t dy = -2; dy < 2; ++dy)
                     for (int8_t dx = -2; dx < 2; ++dx)
                         assert(display.pixels[y + dy][x + dx] == WHITE);
@@ -64,7 +64,7 @@ int main() {
         game.player.maxHp = 6;
         renderGame(display, game);
         for (uint8_t heart = 0; heart < 4; ++heart) {
-            const uint8_t shapes[][5] = {{10, 17, 17, 14, 4}, {10, 31, 31, 14, 4}, {10, 31, 27, 14, 4}};
+            const uint8_t shapes[][5] = {{10, 21, 17, 10, 4}, {10, 31, 31, 14, 4}, {10, 31, 27, 14, 4}};
             for (uint8_t row = 0; row < 5; ++row)
                 for (uint8_t col = 0; col < 5; ++col)
                     assert(display.pixels[9 + row][UI_COLUMN_X + heart * 6 + col] ==
@@ -82,11 +82,21 @@ int main() {
         game.player.slots[0].ability = static_cast<AbilityId>(id);
         game.player.slots[0].cooldown = abilityCooldown(game.player.slots[0].ability);
         renderGame(display, game);
+        assert(display.pixels[33][UI_COLUMN_X + 7] == WHITE);
+        assert(display.pixels[33][UI_COLUMN_X + 23] == BLACK);
         assert(display.pixels[34][UI_COLUMN_X + 9] == BLACK);
         game.player.slots[0].cooldown = 0;
         renderGame(display, game);
         assert(display.pixels[34][127 - 1] == WHITE);
     }
+    game.combat.scoreOrbs[0] = {70 * FIXED_ONE, 20 * FIXED_ONE, 5, 1};
+    renderGame(display, game);
+    const uint8_t coinShape[] = {14, 21, 21, 21, 14};
+    for (uint8_t row = 0; row < 5; ++row)
+        for (uint8_t col = 0; col < 5; ++col)
+            assert(display.pixels[18 + row][68 + col] ==
+                   bool(coinShape[row] & (16 >> col)));
+    game.combat.scoreOrbs[0].lifetime = 0;
     uint8_t sidebar[64][24];
     renderGame(display, game);
     for (uint8_t y = 0; y < 64; ++y) std::memcpy(sidebar[y], &display.pixels[y][104], 24);
@@ -97,7 +107,8 @@ int main() {
         game.player.y = edge[1] * 16;
         spawnEnemy(game.combat.enemies[0], EnemyType::Splitter,
                    (edge[0] ? ARENA_WIDTH - ENEMY_HALF_WIDTH : ENEMY_HALF_WIDTH) * 16,
-                   (edge[1] ? ARENA_HEIGHT - ENEMY_HALF_HEIGHT : ENEMY_HALF_HEIGHT) * 16, 16);
+                   (edge[1] ? ARENA_HEIGHT - ENEMY_HALF_HEIGHT : ENEMY_HALF_HEIGHT) * 16, 16,
+                   game.combat.currentStage);
         game.combat.scoreOrbs[0] = {int16_t(edge[0] * 16), int16_t(edge[1] * 16), 5, 1};
         game.combat.projectiles[0] = {int16_t(edge[0] * 16), int16_t(edge[1] * 16), 32, 0, 1};
         game.combat.spawnTimer = 1;

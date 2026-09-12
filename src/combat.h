@@ -54,6 +54,7 @@ struct Combat {
     Dummy dummies[DUMMY_COUNT];
     Projectile projectiles[MAX_PROJECTILES];
     uint8_t shotCooldown;
+    uint8_t burstShots;         // Выпущенные пули текущей очереди (0 = новый заход)
     
     // Новая система врагов
     Enemy enemies[MAX_ENEMIES];
