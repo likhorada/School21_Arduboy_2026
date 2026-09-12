@@ -138,6 +138,11 @@ void testTimerAndWaves() {
             assert(game.state == GameState::StageCleared);
             updateGame(game, pressA);
             updateGame(game, pressB);
+            // Новый стейдж всегда ставит игрока в стартовый центр поля.
+            assert(game.combat.currentStage == stage + 1);
+            assert(game.player.x == PLAYER_START_X * FIXED_ONE);
+            assert(game.player.y == PLAYER_START_Y * FIXED_ONE);
+            assert(!playerBlocked(game.combat.currentStage, game.player.x, game.player.y));
         }
     }
     assert(game.state == GameState::Win);
@@ -314,7 +319,7 @@ void testContactAndSpawns() {
 }
 
 void testEnemyBoundariesAndSpeed() {
-    const int16_t edges[][2] = {{6 * 16, 52 * 16}, {98 * 16, 52 * 16}, {70 * 16, 3 * 16}, {70 * 16, 61 * 16}};
+    const int16_t edges[][2] = {{6 * 16, 52 * 16}, {(ARENA_WIDTH - ENEMY_HALF_WIDTH) * 16, 52 * 16}, {70 * 16, 3 * 16}, {70 * 16, 61 * 16}};
     const int16_t targets[][2] = {{90 * 16, 52 * 16}, {10 * 16, 52 * 16}, {70 * 16, 50 * 16}, {70 * 16, 10 * 16}};
     const EnemyType types[] = {EnemyType::Basic, EnemyType::Fast, EnemyType::Splitter};
     for (uint8_t edge = 0; edge < 4; ++edge) {
@@ -448,20 +453,20 @@ void testAbilitiesAndCombat() {
 
     game = fixture();
     game.combat.freezeFrames = 10;
-    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 90 * 16, 45 * 16, 3,
+    game.combat.currentStage = 1;
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 75 * 16, 50 * 16, 3,
                game.combat.currentStage);
-    spawnEnemy(game.combat.enemies[1], EnemyType::Basic, 30 * 16, 28 * 16, 3,
-               game.combat.currentStage);
-    assert(shotBlocked(game.combat.currentStage, 65 * 16 + HALF_PLAYER, 25 * 16 + HALF_PLAYER,
-                       90 * 16 - (65 * 16 + HALF_PLAYER), 45 * 16 - (25 * 16 + HALF_PLAYER)));
-    updateCombat(game.combat, 65 * 16, 25 * 16);
+    // Стена col59 на row 50 закрывает луч влево; видимый враг справа.
+    assert(shotBlocked(1, 60 * 16, 50 * 16, (59 - 60) * 16, 0));
+    assert(!shotBlocked(1, 60 * 16, 50 * 16, (75 - 60) * 16, 0));
+    updateCombat(game.combat, 60 * 16 - HALF_PLAYER, 50 * 16 - HALF_PLAYER);
     assert(game.combat.projectiles[0].framesLeft == PROJECTILE_LIFETIME);
-    assert(game.combat.projectiles[0].velocityX < 0); // Visible target, not closer covered target.
+    assert(game.combat.projectiles[0].velocityX > 0); // Видимая цель, не стена.
     game = fixture();
     game.combat.freezeFrames = 10;
     spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 6 * 16, 50 * 16, 8,
                game.combat.currentStage);
-    game.combat.projectiles[0] = {103 * 16, 50 * 16, PROJECTILE_SPEED, 0, 2};
+    game.combat.projectiles[0] = {(ARENA_WIDTH - 1) * 16, 50 * 16, PROJECTILE_SPEED, 0, 2};
     updateCombat(game.combat, game.player.x, game.player.y);
     assert(getEnemyHp(game.combat.enemies[0]) == 9);
     createScoreOrb(game.combat.scoreOrbs, 0, 0, 5);
@@ -509,6 +514,39 @@ bool referenceSegment(int x, int y, int dx, int dy, const Obstacle& box) {
     return false;
 }
 
+// Independent oracle for shotBlocked on axis-aligned rays: every pixel the
+// segment crosses, walked in whole-pixel steps. The game marches dominant-axis
+// samples (spacing <= 1px), so both report the exact same pixel set.
+int normalizeTest(int value, int extent) {
+    return (value % extent + extent) % extent;
+}
+
+bool referencePixelRay(int stage, int x, int y, int dx, int dy) {
+    if (dx == 0 && dy == 0) {
+        return stageWallPixel(stage, uint8_t(x / FIXED_ONE), uint8_t(y / FIXED_ONE));
+    }
+    const int delta = dx != 0 ? dx : dy;
+    const int extent = dx != 0 ? ARENA_WIDTH_FIXED : ARENA_HEIGHT_FIXED;
+    const int sign = delta > 0 ? 1 : -1;
+    const int magnitude = sign * delta;
+    const int start = dx != 0 ? x : y;
+    // Каждая целая пиксельная граница (кратно FIXED_ONE) и сам последний
+    // подкамень отрезка: ровно те пиксели, которые видит марш игры.
+    const int steps = magnitude / FIXED_ONE;
+    for (int k = 0; k <= steps; ++k) {
+        const int sample = start + sign * k * FIXED_ONE;
+        const int pos = (sample % extent + extent) % extent;
+        if (stageWallPixel(stage, uint8_t(dx != 0 ? pos / FIXED_ONE : x / FIXED_ONE),
+                           uint8_t(dy != 0 ? pos / FIXED_ONE : y / FIXED_ONE))) {
+            return true;
+        }
+    }
+    int end = (start + delta) % extent;
+    if (end < 0) end += extent;
+    return stageWallPixel(stage, uint8_t(dx != 0 ? end / FIXED_ONE : x / FIXED_ONE),
+                          uint8_t(dy != 0 ? end / FIXED_ONE : y / FIXED_ONE));
+}
+
 void testGeometry() {
     uint32_t rng = 0x94ab276du;
     auto random = [&rng]() -> uint32_t { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; };
@@ -518,9 +556,34 @@ void testGeometry() {
         const int dy = int(random() % (ARENA_HEIGHT_FIXED + 1)) - ARENA_HEIGHT_FIXED / 2;
         const Obstacle box = {uint8_t(random() % ARENA_WIDTH), uint8_t(random() % ARENA_HEIGHT), uint8_t(random() % 20), uint8_t(random() % 20)};
         assert(segmentHitsBox(x, y, dx, dy, box) == referenceSegment(x, y, dx, dy, box));
-        bool wall = false;
-        for (uint8_t i = 0; i < getStageObstacleCount(0); ++i) wall |= referenceSegment(x, y, dx, dy, readObstacle(0, i));
-        assert(shotBlocked(0, x, y, dx, dy) == wall);
+    }
+    // Стейдж 1 — пустое поле: никакой выстрел не блокируется.
+    for (int x = 0; x < ARENA_WIDTH_FIXED; x += 3) {
+        for (int dx = -ARENA_WIDTH_FIXED / 2; dx <= ARENA_WIDTH_FIXED / 2; dx += 7) {
+            assert(!shotBlocked(0, normalizeTest(x, ARENA_WIDTH_FIXED), 0, dx, 0));
+            for (int dy = -ARENA_HEIGHT_FIXED / 2; dy <= ARENA_HEIGHT_FIXED / 2; dy += 7) {
+                assert(!shotBlocked(0, 0, normalizeTest(x, ARENA_HEIGHT_FIXED), 0, dy));
+            }
+        }
+    }
+    // Оси-выровненные лучи по пиксельным стенам stейджей 2 и 3.
+    for (uint8_t stage = 1; stage <= 2; ++stage) {
+        for (int y = 0; y < ARENA_HEIGHT_FIXED; y += FIXED_ONE) {
+            for (int x = 0; x < ARENA_WIDTH_FIXED; x += 13) {
+                for (int dx = -ARENA_WIDTH_FIXED / 2; dx <= ARENA_WIDTH_FIXED / 2; dx += 5) {
+                    assert(shotBlocked(stage, x, y, dx, 0) ==
+                           referencePixelRay(stage, x, y, dx, 0));
+                }
+            }
+        }
+        for (int x = 0; x < ARENA_WIDTH_FIXED; x += 13) {
+            for (int y = 0; y < ARENA_HEIGHT_FIXED; y += FIXED_ONE) {
+                for (int dy = -ARENA_HEIGHT_FIXED / 2; dy <= ARENA_HEIGHT_FIXED / 2; dy += 5) {
+                    assert(shotBlocked(stage, x, y, 0, dy) ==
+                           referencePixelRay(stage, x, y, 0, dy));
+                }
+            }
+        }
     }
 }
 

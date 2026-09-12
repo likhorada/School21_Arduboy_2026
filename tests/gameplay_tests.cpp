@@ -14,9 +14,10 @@ int16_t normalized(int value, int extent) {
     return static_cast<int16_t>((value % extent + extent) % extent);
 }
 
-Game playingAt(int16_t x, int16_t y) {
+Game playingAt(int16_t x, int16_t y, uint8_t stage = 0) {
     Game game = {};
     startGame(game);
+    game.combat.currentStage = stage;
     game.player.x = x;
     game.player.y = y;
     // Movement fixtures have no waves; the real stage timer still ticks normally.
@@ -218,69 +219,67 @@ void testWraps() {
     }
 }
 
-// Независимая проверка: сдвигаем препятствия, а не координаты игрока.
-bool referenceBlocked(int x, int y) {
+// Независимая проверка: сдвигаем бокс игрока, а не препятствия. Сравнивает
+// пиксельную маску стены стейджа с попиксельной проверкой playerBlocked.
+bool referenceStageBlocked(unsigned stage, int x, int y) {
     const int size = PLAYER_SIZE * FIXED_ONE;
-    for (unsigned i = 0; i < getStageObstacleCount(0); ++i) {
-        const Obstacle obstacle = readObstacle(0, i);
-        for (int copyX = -1; copyX <= 1; ++copyX) {
-            for (int copyY = -1; copyY <= 1; ++copyY) {
-                const int left = obstacle.x * FIXED_ONE + copyX * ARENA_WIDTH_FIXED;
-                const int top = obstacle.y * FIXED_ONE + copyY * ARENA_HEIGHT_FIXED;
-                if (x < left + obstacle.width * FIXED_ONE && x + size > left &&
-                    y < top + obstacle.height * FIXED_ONE && y + size > top) {
-                    return true;
-                }
+    const int startX = x / FIXED_ONE;
+    const int endX = (x + size - 1) / FIXED_ONE;
+    const int startY = y / FIXED_ONE;
+    const int endY = (y + size - 1) / FIXED_ONE;
+    for (int py = startY; py <= endY; ++py) {
+        for (int px = startX; px <= endX; ++px) {
+            const int wx = (px % ARENA_WIDTH + ARENA_WIDTH) % ARENA_WIDTH;
+            const int wy = (py % ARENA_HEIGHT + ARENA_HEIGHT) % ARENA_HEIGHT;
+            if (stageWallPixel(uint8_t(stage), uint8_t(wx), uint8_t(wy))) {
+                return true;
             }
         }
     }
     return false;
 }
 
-void testObstacleAabb() {
-    assert(getStageObstacleCount(0) == 4);
-    const Obstacle seamObstacle = readObstacle(0, 0);
-    assert(seamObstacle.x == 3 && seamObstacle.y == 14);
-    // Раскладка второго стейджа отличается от первой и тоже читается.
-    assert(getStageObstacleCount(1) == 4);
-    const Obstacle stage2First = readObstacle(1, 0);
-    assert(stage2First.x == 48 && stage2First.y == 4);
-    assert(getStageObstacleCount(99) == 0);
-    assert(readObstacle(99, 0).x == 0 && readObstacle(1, 99).width == 0);
-    const Obstacle invalid = readObstacle(0, getStageObstacleCount(0));
-    assert(invalid.x == 0 && invalid.y == 0 && invalid.width == 0 && invalid.height == 0);
-    for (unsigned i = 0; i < getStageObstacleCount(0); ++i) {
-        const Obstacle obstacle = readObstacle(0, i);
-        const int left = (static_cast<int>(obstacle.x) - PLAYER_SIZE) * FIXED_ONE;
-        const int right = (obstacle.x + obstacle.width) * FIXED_ONE;
-        const int top = (static_cast<int>(obstacle.y) - PLAYER_SIZE) * FIXED_ONE;
-        const int bottom = (obstacle.y + obstacle.height) * FIXED_ONE;
-        const int x = obstacle.x * FIXED_ONE;
-        const int y = obstacle.y * FIXED_ONE;
-        assert(playerBlocked(0, x, y));
-        assert(!playerBlocked(0, normalized(left, ARENA_WIDTH_FIXED), y));
-        assert(playerBlocked(0, normalized(left + 1, ARENA_WIDTH_FIXED), y));
-        assert(!playerBlocked(0, right, y));
-        assert(playerBlocked(0, right - 1, y));
-        assert(!playerBlocked(0, x, top));
-        assert(playerBlocked(0, x, top + 1));
-        assert(!playerBlocked(0, x, bottom));
-        assert(playerBlocked(0, x, bottom - 1));
-        assert(!playerBlocked(0, normalized(left, ARENA_WIDTH_FIXED), top));
-        assert(playerBlocked(0, normalized(left + 1, ARENA_WIDTH_FIXED), top + 1));
-    }
-    // При x=124 игрок через край лишь касается препятствия с x=3.
-    assert(!playerBlocked(0, (ARENA_WIDTH - 4) * FIXED_ONE, 14 * FIXED_ONE));
-    assert(playerBlocked(0, (ARENA_WIDTH - 4) * FIXED_ONE + 1, 14 * FIXED_ONE));
-    assert(playerBlocked(0, ARENA_WIDTH_FIXED - 1, 14 * FIXED_ONE));
-    assert(playerBlocked(0, 0, 14 * FIXED_ONE));
-    for (int y = 0; y < ARENA_HEIGHT_FIXED; y += FIXED_ONE) {
-        for (int x = 0; x < ARENA_WIDTH_FIXED; x += FIXED_ONE) {
-            const int fractions[] = {0, 1, FIXED_ONE - 1};
-            for (unsigned fx = 0; fx < 3; ++fx) {
-                for (unsigned fy = 0; fy < 3; ++fy) {
-                    assert(playerBlocked(0, x + fractions[fx], y + fractions[fy]) ==
-                           referenceBlocked(x + fractions[fx], y + fractions[fy]));
+void testStageWalls() {
+    // Стейдж 1 — пустое поле, а вот стейджи 2 и 3 читаются из масок.
+    assert(stageWallPixel(0, 0, 0) == false);
+    assert(stageWallPixel(0, 72, 33) == false);
+    // Опорные пиксели стейджа 2: вертикали col52/col59 и диагональ col49.
+    assert(stageWallPixel(1, 52, 0));
+    assert(stageWallPixel(1, 52, 12));
+    assert(!stageWallPixel(1, 52, 13));
+    assert(stageWallPixel(1, 59, 8));
+    assert(stageWallPixel(1, 59, 19));
+    assert(!stageWallPixel(1, 59, 20));
+    assert(stageWallPixel(1, 49, 14));
+    assert(!stageWallPixel(1, 49, 17));
+    assert(!stageWallPixel(1, 53, 8));
+    // Стейдж 3: колонны по краям и диагональные распорки.
+    assert(stageWallPixel(2, 87, 0));
+    assert(stageWallPixel(2, 87, 60));
+    assert(!stageWallPixel(2, 87, 4));
+    assert(stageWallPixel(2, 94, 31));
+    assert(!stageWallPixel(2, 94, 30));
+    assert(stageWallPixel(2, 15, 60));
+    assert(stageWallPixel(2, 21, 21));
+    // Горизонтальная распорка через всю ширину на row 27.
+    assert(stageWallPixel(2, 0, 27));
+    assert(!stageWallPixel(2, 0, 28));
+    // Вне диапазона маски нет.
+    assert(stageWallPixel(2, 103, 15) == false);
+    assert(stageWallPixel(1, 45, 64) == false);
+    // Сверху вниз: playerBlocked согласен с попиксельным оракулом на всех
+    // стейджах и всех долях пикселя.
+    for (uint8_t stage = 0; stage <= 2; ++stage) {
+        for (int y = 0; y < ARENA_HEIGHT_FIXED; y += 3) {
+            for (int x = 0; x < ARENA_WIDTH_FIXED; x += 3) {
+                const int fractions[] = {0, 1, FIXED_ONE - 1};
+                for (unsigned fx = 0; fx < 3; ++fx) {
+                    for (unsigned fy = 0; fy < 3; ++fy) {
+                        const int px = x + fractions[fx];
+                        const int py = y + fractions[fy];
+                        assert(playerBlocked(stage, px, py) ==
+                               referenceStageBlocked(stage, px, py));
+                    }
                 }
             }
         }
@@ -288,68 +287,86 @@ void testObstacleAabb() {
 }
 
 void testSlidingAndDashCollision() {
-    // Подходим с четырёх сторон, включая переход через край к x=3.
-    for (unsigned i = 0; i < getStageObstacleCount(0); ++i) {
-        const Obstacle obstacle = readObstacle(0, i);
-        for (unsigned side = 0; side < 4; ++side) {
-            const bool horizontal = side < 2;
-            const int8_t direction = side % 2 == 0 ? 1 : -1;
-            const int boundary = horizontal ?
-                (direction > 0 ? static_cast<int>(obstacle.x) - PLAYER_SIZE :
-                                 obstacle.x + obstacle.width) * FIXED_ONE :
-                (direction > 0 ? static_cast<int>(obstacle.y) - PLAYER_SIZE :
-                                 obstacle.y + obstacle.height) * FIXED_ONE;
-            const int extent = horizontal ? ARENA_WIDTH_FIXED : ARENA_HEIGHT_FIXED;
-            const int start = normalized(boundary - direction * (FIXED_ONE + 3), extent);
-            const int16_t x = horizontal ? start : obstacle.x * FIXED_ONE;
-            const int16_t y = horizontal ? obstacle.y * FIXED_ONE : start;
-            Game game = playingAt(x, y);
-            const InputFrame dash = {
-                static_cast<int8_t>(horizontal ? direction : 0),
-                static_cast<int8_t>(horizontal ? 0 : direction), true, false, false, false
-            };
+    constexpr unsigned stage = 1;
+    // Dash влево в восточный гребень col59 (rows 0..19): с (60,5) гасится
+    // внутри первого кадра, игрок упирается в x=60*16.
+    {
+        Game game = playingAt(60 * 16, 5 * 16, stage);
+        const InputFrame dash = {-1, 0, true, false, false, false};
+        updateGame(game, dash);
+        assert(game.player.x == 60 * 16);
+        assert(game.player.y == 5 * 16);
+        assert(game.player.dashFrames == 0);
+        assert(game.player.slots[0].cooldown == DASH_COOLDOWN);
+        assertSafe(game);
+    }
+    // Dash с дистанции проходит все подшаги и встаёт у той же стены.
+    {
+        Game game = playingAt(64 * 16, 5 * 16, stage);
+        const InputFrame dash = {-1, 0, true, false, false, false};
+        updateGame(game, dash);
+        assert(game.player.x == 60 * 16 && game.player.y == 5 * 16);
+        assert(game.player.dashFrames == DASH_DURATION - 1);
+        for (unsigned frame = 1; frame < DASH_DURATION; ++frame) {
             updateGame(game, dash);
-            // Первый подшаг свободен, следующий зайдёт в стену на 13/16 пикселя.
-            const int stopped = normalized(boundary - direction * 3, extent);
-            assert(game.player.x == (horizontal ? stopped : x));
-            assert(game.player.y == (horizontal ? y : stopped));
-            assert(game.player.dashFrames == 0);
-            assert(game.player.slots[0].cooldown == DASH_COOLDOWN);
-            assertSafe(game);
-            const Player hit = game.player;
-            updateGame(game, idle);
-            assert(game.player.x == hit.x && game.player.y == hit.y);
-
-            // Ходьба скользит вдоль стены, а Dash останавливается по обеим осям.
-            const int16_t faceX = horizontal ? normalized(boundary, extent) : x;
-            const int16_t faceY = horizontal ? y : normalized(boundary, extent);
-            const InputFrame diagonal = {
-                static_cast<int8_t>(horizontal ? direction : 1),
-                static_cast<int8_t>(horizontal ? 1 : direction), false, false, false, false
-            };
-            game = playingAt(faceX, faceY);
-            updateGame(game, diagonal);
-            assert(game.player.x == faceX + (horizontal ? 0 : 11));
-            assert(game.player.y == faceY + (horizontal ? 11 : 0));
-            assertSafe(game);
-            game = playingAt(faceX, faceY);
-            InputFrame diagonalDash = diagonal;
-            diagonalDash.activateA = true;
-            updateGame(game, diagonalDash);
-            assert(game.player.x == faceX && game.player.y == faceY);
-            assert(game.player.dashFrames == 0);
-            assertSafe(game);
-
-            // Повторные шаги и попытки Dash не должны проходить сквозь стену.
-            InputFrame intoWall = dash;
-            intoWall.activateA = false;
-            for (unsigned frame = 0; frame < 2 * DASH_COOLDOWN; ++frame) {
-                intoWall.activateA = frame % 7 == 0;
-                updateGame(game, intoWall);
-                assert(game.player.x == faceX && game.player.y == faceY);
-                assertSafe(game);
-            }
         }
+        assert(game.player.x == 60 * 16 && game.player.dashFrames == 0);
+        assertSafe(game);
+    }
+    // Ходьба влево той же дорогой останавливается на том же пикселе.
+    {
+        Game game = playingAt(64 * 16, 5 * 16, stage);
+        const InputFrame walk = {-1, 0, false, false, false, false};
+        for (unsigned frame = 0; frame < 12; ++frame) {
+            updateGame(game, walk);
+        }
+        assert(game.player.x == 60 * 16 && game.player.y == 5 * 16);
+        assertSafe(game);
+        const Player hit = game.player;
+        for (unsigned frame = 0; frame < 3; ++frame) {
+            updateGame(game, walk);
+        }
+        assertSamePlayer(game.player, hit);
+    }
+    // Диагональная ходьба (скорость 11) скользит вниз по гребню col59: пока
+    // бокс перекрывает верх стены, x прибит, y растёт; распорка col60
+    // (rows 19..20) застопоривает бокс снизу.
+    {
+        Game game = playingAt(64 * 16, 5 * 16, stage);
+        const InputFrame diag = {-1, 1, false, false, false, false};
+        updateGame(game, diag);
+        assert(game.player.x == 1013 && game.player.y == 91);
+        assertSafe(game);
+        for (int frame = 1; frame <= 4; ++frame) {
+            updateGame(game, diag);
+            assert(game.player.x == 1013 - 11 * frame);
+            assertSafe(game);
+        }
+        for (int frame = 1; frame <= 4; ++frame) {
+            updateGame(game, diag);
+            assert(game.player.x == 969);
+            assert(game.player.y == 135 + 11 * frame);
+            assertSafe(game);
+        }
+        for (unsigned frame = 0; frame < 4; ++frame) {
+            updateGame(game, diag);
+        }
+        assert(game.player.x == 969 && game.player.y == 190);
+        const Player hit = game.player;
+        for (unsigned frame = 0; frame < 4; ++frame) {
+            updateGame(game, diag);
+        }
+        assertSamePlayer(game.player, hit);
+    }
+    // Ниже гребня (rows 20..44) стена отсутствует: ходьба влево свободна.
+    {
+        Game game = playingAt(70 * 16, 30 * 16, stage);
+        const InputFrame walk = {-1, 0, false, false, false, false};
+        for (unsigned frame = 0; frame < 6; ++frame) {
+            updateGame(game, walk);
+        }
+        assert(game.player.x == 64 * 16);
+        assertSafe(game);
     }
 }
 
@@ -521,6 +538,9 @@ const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
 
 void testMapConnectivity() {
     // На ПК обходим позиции игрока по пикселям с учётом переходов через края.
+    // Стейдж 1 — тёк-ток-тое: внешняя часть арены должна быть связной (кольца
+    // внутри O-фигур — закрытые карманы, они не считаются игровым полем).
+    const unsigned stage = 1;
     const unsigned cells = ARENA_WIDTH * ARENA_HEIGHT;
     bool visited[cells] = {};
     uint16_t queue[cells] = {};
@@ -538,7 +558,8 @@ void testMapConnectivity() {
             const int nx = normalized(x + dx[direction], ARENA_WIDTH);
             const int ny = normalized(y + dy[direction], ARENA_HEIGHT);
             const unsigned next = ny * ARENA_WIDTH + nx;
-            if (!visited[next] && !referenceBlocked(nx * FIXED_ONE, ny * FIXED_ONE)) {
+            if (!visited[next] &&
+                !referenceStageBlocked(stage, nx * FIXED_ONE, ny * FIXED_ONE)) {
                 assert(count < cells);
                 visited[next] = true;
                 queue[count++] = static_cast<uint16_t>(next);
@@ -547,12 +568,18 @@ void testMapConnectivity() {
     }
     unsigned freeCells = 0;
     for (unsigned cell = 0; cell < cells; ++cell) {
-        const bool free = !referenceBlocked((cell % ARENA_WIDTH) * FIXED_ONE,
-                                           (cell / ARENA_WIDTH) * FIXED_ONE);
-        assert(visited[cell] == free);
-        freeCells += free;
+        const bool free = !referenceStageBlocked(stage,
+                                                 (cell % ARENA_WIDTH) * FIXED_ONE,
+                                                 (cell / ARENA_WIDTH) * FIXED_ONE);
+        // Закрытые кольца O-фигур не достигаются, но их немного.
+        if (free) {
+            ++freeCells;
+        }
+        assert(!visited[cell] || free);
     }
-    assert(count == freeCells);
+    // Большая часть свободных клеток достижима от спавна игрока.
+    assert(count >= freeCells - 120);
+    assert(count >= freeCells * 19 / 20);
     std::printf("Map connectivity: %u/%u free integer-pixel positions reachable\n",
                 count, freeCells);
 }
@@ -595,7 +622,8 @@ void testRandomizedInput() {
             }
             assert(game.state == GameState::Playing);
             assertSafe(game);
-            assert(!referenceBlocked(game.player.x, game.player.y));
+            assert(!referenceStageBlocked(game.combat.currentStage, game.player.x,
+                                          game.player.y));
             assert(game.player.dashFrames < DASH_DURATION);
             for (unsigned slot = 0; slot < ACTIVE_SLOT_COUNT; ++slot) {
                 assert(game.player.slots[slot].cooldown <= DASH_COOLDOWN);
@@ -679,6 +707,29 @@ void testPause() {
     assert(game.state == GameState::Playing);
 }
 
+// Переход на следующий стейдж из магазина ("Next") обязан вернуть игрока
+// в стартовый центр, а не оставить его на месте прошлого стейджа: там его
+// позиция может оказаться в стене или у самого края карты (как на третьем
+// стейдже с плотным угловым артом).
+void testStageTransitionRepositionsToSpawn() {
+    Game game = {};
+    startGame(game);
+    game.state = GameState::Shop;
+    game.shop = {};
+    game.combat.currentStage = 1; // стоим на пороге третьего стейджа
+    game.player.x = 8 * FIXED_ONE; // угловая позиция с прошлого поля
+    game.player.y = 8 * FIXED_ONE;
+    game.shop.selectedIndex = 6;
+    const InputFrame pressA = {0, 0, true, false, false, false};
+    updateGame(game, pressA);
+    assert(game.state == GameState::Playing);
+    assert(game.combat.currentStage == 2);
+    assert(game.player.x == PLAYER_START_X * FIXED_ONE);
+    assert(game.player.y == PLAYER_START_Y * FIXED_ONE);
+    assert(getFacingX(game.player) == 1 && getFacingY(game.player) == 0);
+    assert(!playerBlocked(game.combat.currentStage, game.player.x, game.player.y));
+}
+
 } // Конец анонимного пространства имён.
 
 int main() {
@@ -687,11 +738,12 @@ int main() {
     testMainMenu();
     testWalking();
     testWraps();
-    testObstacleAabb();
+    testStageWalls();
     testSlidingAndDashCollision();
     testDashMotion();
     testSlotsAndInputEdges();
     testMapConnectivity();
+    testStageTransitionRepositionsToSpawn();
     testRandomizedInput();
     testPause();
     std::puts("All gameplay tests passed.");

@@ -139,6 +139,11 @@ void applyShopChoice(Game& game) {
         game.combat.freezeFrames = 0;
         game.combat.burstShots = 0;
         game.player.dashFrames = 0;
+        // Позиция переносится с прошлого стейджа; на новом поле она может
+        // оказаться в стене или у края карты — возвращаем её в стартовую точку.
+        game.player.x = PLAYER_START_X * FIXED_ONE;
+        game.player.y = PLAYER_START_Y * FIXED_ONE;
+        setFacing(game.player, 1, 0);
         game.state = GameState::Playing;
         return;
     }

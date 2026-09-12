@@ -1,6 +1,8 @@
 #include <Arduboy2.h>
 #include "render.h"
 #include "arena.h"
+#include "assets/menu_screens.h"
+#include "lzss.h"
 #include "stages.h"
 #include <cassert>
 #include <cstdio>
@@ -114,6 +116,151 @@ int main() {
         game.combat.spawnTimer = 1;
         renderGame(display, game);
         for (uint8_t y = 0; y < 64; ++y) assert(std::memcmp(sidebar[y], &display.pixels[y][104], 24) == 0);
+    }
+    // Голден-проверка LZSS-декодера против tools/convert_assets.py: каждый экран
+    // перекодируется в общий буфер (как на устройстве) и сверяется с CRC.
+    {
+        uint32_t crc_table[256];
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (uint8_t k = 0; k < 8; ++k)
+                c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            crc_table[i] = c;
+        }
+        const auto crc32 = [&crc_table](const uint8_t* data, size_t n) -> uint32_t {
+            uint32_t c = 0xFFFFFFFFu;
+            for (size_t i = 0; i < n; ++i)
+                c = crc_table[(c ^ data[i]) & 0xFF] ^ (c >> 8);
+            return c ^ 0xFFFFFFFFu;
+        };
+        uint8_t frame[MENU_SCREEN_BYTES] = {};
+        for (uint8_t screen = 0; screen < MENU_SCREEN_COUNT; ++screen) {
+            lzssDecodeScreens(screen + 1, frame, menu_screens);
+            assert(crc32(frame, sizeof(frame)) == menu_screen_crcs[screen]);
+        }
+    }
+    // Экран меню рисуется по декодированным пикселям и совпадает с буфером.
+    const auto screenMatches = [&display](uint16_t count) {
+        uint8_t frame[MENU_SCREEN_BYTES] = {};
+        lzssDecodeScreens(count, frame, menu_screens);
+        for (uint8_t y = 0; y < 64; ++y)
+            for (uint8_t x = 0; x < 128; ++x)
+                assert(display.pixels[y][x] ==
+                       bool(frame[(y / 8) * 128 + x] & (1 << (y % 8))));
+    };
+    for (uint8_t sel = 0; sel < 4; ++sel) {
+        game.state = GameState::Menu;
+        game.menu.selectedIndex = sel;
+        renderGame(display, game);
+        screenMatches(2 + sel);
+    }
+    for (uint8_t sel = 0; sel < 3; ++sel) {
+        game.state = GameState::SoundMenu;
+        game.soundMenu.selectedIndex = sel;
+        renderGame(display, game);
+        screenMatches(6 + sel);
+    }
+    // Байтовые писатели спрайтов (AVR-путь рендера) обязаны давать те же
+    // пиксели, что и попиксельный drawPixel в плоском буфере Arduboy.
+    const auto refSet = [](uint8_t* buf, int x, int y) {
+        assert(x >= 0 && x < 128 && y >= 0 && y < 64);
+        buf[(y >> 3) * 128 + x] |= static_cast<uint8_t>(1 << (y & 7));
+    };
+    {
+        uint8_t got[1024] = {}, want[1024] = {};
+        for (unsigned bits = 0; bits < 256; ++bits) {
+            for (uint8_t height = 1; height <= 8; ++height) {
+                for (int y = -2; y < 70; ++y) {
+                    for (int x = -3; x < 132; ++x) {
+                        std::memset(got, 0, sizeof got);
+                        std::memset(want, 0, sizeof want);
+                        fillFrameColumn(got, x, y, static_cast<uint8_t>(bits), height);
+                        for (uint8_t r = 0; r < height; ++r) {
+                            if (!(bits & (1u << r))) continue;
+                            if (x >= 0 && x < 128 && y + r >= 0 && y + r < 64)
+                                refSet(want, x, static_cast<int>(y + r));
+                        }
+                        assert(std::memcmp(got, want, sizeof got) == 0);
+                    }
+                }
+            }
+        }
+    }
+    {
+        // Тот же спрайт игрока, что в render.cpp (7 байт-колонок, бит = строка).
+        static const uint8_t kPlayerBitmap[] = {0x3e, 0x7f, 0x55, 0x5d,
+                                                0x55, 0x7f, 0x3e};
+        static_assert(sizeof(kPlayerBitmap) == PLAYER_SIZE, "player sprite size");
+        const auto wrapc = [](int v, int e) {
+            v %= e;
+            return v < 0 ? v + e : v;
+        };
+        uint8_t got[1024] = {}, want[1024] = {};
+        for (int y = 0; y < ARENA_HEIGHT; ++y) {
+            for (int x = 0; x < ARENA_WIDTH; ++x) {
+                for (int8_t fx = -1; fx <= 1; ++fx) {
+                    for (int8_t fy = -1; fy <= 1; ++fy) {
+                        for (uint8_t dash = 0; dash < 2; ++dash) {
+                            Player p = {};
+                            p.x = x * FIXED_ONE;
+                            p.y = y * FIXED_ONE;
+                            setFacing(p, fx, fy);
+                            p.dashFrames = dash ? 1 : 0;
+                            std::memset(got, 0, sizeof got);
+                            std::memset(want, 0, sizeof want);
+                            renderPlayerFrame(got, p);
+                            for (uint8_t column = 0; column < PLAYER_SIZE; ++column) {
+                                for (uint8_t row = 0; row < PLAYER_SIZE; ++row) {
+                                    const bool eye =
+                                        column == 3 + fx * 2 && row == 3 + fy * 2;
+                                    const bool lit =
+                                        !eye && (dash ||
+                                                 (kPlayerBitmap[column] &
+                                                  (1u << row)));
+                                    if (!lit) continue;
+                                    refSet(want, wrapc(x + column, ARENA_WIDTH),
+                                           wrapc(y + row, ARENA_HEIGHT));
+                                }
+                            }
+                            assert(std::memcmp(got, want, sizeof got) == 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Перенос шрифта врагов [строка][колонка] → [колонка][строка] не должен
+    // зеркалить глифы: pixel(r, c) обязан совпадать с эталоном.
+    {
+        static const uint8_t reference[18][5] = {
+            {0x06, 0x09, 0x09, 0x09, 0x06}, // 0
+            {0x02, 0x06, 0x02, 0x02, 0x07}, // 1
+            {0x0e, 0x01, 0x06, 0x08, 0x0f}, // 2
+            {0x0e, 0x01, 0x06, 0x01, 0x0e}, // 3
+            {0x09, 0x09, 0x0f, 0x01, 0x01}, // 4
+            {0x0f, 0x08, 0x0e, 0x01, 0x0e}, // 5
+            {0x06, 0x08, 0x0e, 0x09, 0x06}, // 6
+            {0x0f, 0x01, 0x02, 0x04, 0x04}, // 7
+            {0x06, 0x09, 0x06, 0x09, 0x06}, // 8
+            {0x06, 0x09, 0x07, 0x01, 0x06}, // 9
+            {0x06, 0x09, 0x0f, 0x09, 0x09}, // A
+            {0x0e, 0x09, 0x0e, 0x09, 0x0e}, // B
+            {0x07, 0x08, 0x08, 0x08, 0x07}, // C
+            {0x0e, 0x09, 0x09, 0x09, 0x0e}, // D
+            {0x0f, 0x08, 0x0e, 0x08, 0x0f}, // E
+            {0x0f, 0x08, 0x0e, 0x08, 0x08}, // F
+            {0x09, 0x06, 0x06, 0x06, 0x09}, // x
+            {0x04, 0x04, 0x0e, 0x09, 0x09}, // d
+        };
+        for (uint8_t g = 0; g < 18; ++g) {
+            for (uint8_t c = 0; c < 4; ++c) {
+                const uint8_t column = pgm_read_byte(&tinyFont[g * 4 + c]);
+                for (uint8_t r = 0; r < 5; ++r) {
+                    assert(bool(column & (1u << r)) ==
+                           bool(reference[g][r] & (1u << c)));
+                }
+            }
+        }
     }
     std::puts("Render regressions passed: screen bounds, menu text, hearts, score, cooldowns, arena isolation.");
 }

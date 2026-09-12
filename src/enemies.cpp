@@ -5,21 +5,23 @@ namespace gc {
 namespace {
 
 // Проверка коллизий врага (хитбокс 12x6, центр в centerX, centerY) с
-// препятствиями текущего стейджа. Возвращает true, если позиция занята стеной.
+// попиксельными стенами текущего стейджа. Возвращает true, если позиция занята
+// стеной. Центр врага не пересекает край арены (без тора для врагов).
 bool enemyHitsObstacle(uint8_t stage, int16_t centerX, int16_t centerY) {
     if (centerX < ENEMY_HALF_WIDTH * FIXED_ONE ||
         centerX > ARENA_WIDTH_FIXED - ENEMY_HALF_WIDTH * FIXED_ONE ||
         centerY < ENEMY_HALF_HEIGHT * FIXED_ONE ||
         centerY > ARENA_HEIGHT_FIXED - ENEMY_HALF_HEIGHT * FIXED_ONE) return true;
-    const uint8_t count = getStageObstacleCount(stage);
-    for (uint8_t i = 0; i < count; ++i) {
-        const Obstacle obs = readObstacle(stage, i);
-        const int16_t dx = obs.x * FIXED_ONE + obs.width * FIXED_ONE / 2 - centerX;
-        const int16_t dy = obs.y * FIXED_ONE + obs.height * FIXED_ONE / 2 - centerY;
-        const int16_t width = ENEMY_HALF_WIDTH * FIXED_ONE + obs.width * FIXED_ONE / 2;
-        const int16_t height = ENEMY_HALF_HEIGHT * FIXED_ONE + obs.height * FIXED_ONE / 2;
-        if (dx > -width && dx < width && dy > -height && dy < height) {
-            return true;
+    const int16_t startX = (centerX - ENEMY_HALF_WIDTH * FIXED_ONE) / FIXED_ONE;
+    const int16_t endX = (centerX + ENEMY_HALF_WIDTH * FIXED_ONE - 1) / FIXED_ONE;
+    const int16_t startY = (centerY - ENEMY_HALF_HEIGHT * FIXED_ONE) / FIXED_ONE;
+    const int16_t endY = (centerY + ENEMY_HALF_HEIGHT * FIXED_ONE - 1) / FIXED_ONE;
+    for (int16_t py = startY; py <= endY; ++py) {
+        for (int16_t px = startX; px <= endX; ++px) {
+            if (stageWallPixel(stage, static_cast<uint8_t>(px),
+                               static_cast<uint8_t>(py))) {
+                return true;
+            }
         }
     }
     return false;
