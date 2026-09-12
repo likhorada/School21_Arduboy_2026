@@ -30,10 +30,10 @@ void assertSafe(const Game& game) {
 }
 
 void assertSamePlayer(const Player& actual, const Player& expected) {
-    // Compare fields, not padding bytes.
+    // Сравниваем поля, а не байты выравнивания структуры.
     assert(actual.x == expected.x && actual.y == expected.y);
-    assert(actual.facingX == expected.facingX);
-    assert(actual.facingY == expected.facingY);
+    assert(getFacingX(actual) == getFacingX(expected));
+    assert(getFacingY(actual) == getFacingY(expected));
     assert(actual.dashFrames == expected.dashFrames);
     for (unsigned i = 0; i < ACTIVE_SLOT_COUNT; ++i) {
         assert(actual.slots[i].ability == expected.slots[i].ability);
@@ -45,7 +45,7 @@ void assertFreshRun(const Game& game) {
     assert(game.state == GameState::Playing);
     assert(game.player.x == PLAYER_START_X * FIXED_ONE);
     assert(game.player.y == PLAYER_START_Y * FIXED_ONE);
-    assert(game.player.facingX == 1 && game.player.facingY == 0);
+    assert(getFacingX(game.player) == 1 && getFacingY(game.player) == 0);
     assert(game.player.dashFrames == 0);
     assert(game.player.slots[0].ability == AbilityId::Dash);
     assert(game.player.slots[1].ability == AbilityId::None);
@@ -54,13 +54,41 @@ void assertFreshRun(const Game& game) {
     assertSafe(game);
 }
 
+void testFacingPacking() {
+    Player player = {};
+    player.x = 123;
+    player.y = 456;
+    player.dashFrames = 3;
+    player.slots[0] = {AbilityId::None, 17};
+    player.slots[1] = {AbilityId::Dash, 29};
+    const Player initial = player;
+    for (int8_t x = -1; x <= 1; ++x) {
+        for (int8_t y = -1; y <= 1; ++y) {
+            // Проверяем все переходы, чтобы старые биты не оставались.
+            for (int8_t nextX = -1; nextX <= 1; ++nextX) {
+                for (int8_t nextY = -1; nextY <= 1; ++nextY) {
+                    setFacing(player, x, y);
+                    assert(getFacingX(player) == x && getFacingY(player) == y);
+                    setFacing(player, nextX, nextY);
+                    assert(getFacingX(player) == nextX && getFacingY(player) == nextY);
+                    assert(player.x == initial.x && player.y == initial.y);
+                    assert(player.dashFrames == initial.dashFrames);
+                    for (unsigned slot = 0; slot < ACTIVE_SLOT_COUNT; ++slot) {
+                        assert(player.slots[slot].ability == initial.slots[slot].ability);
+                        assert(player.slots[slot].cooldown == initial.slots[slot].cooldown);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void testTitleAndReset() {
     Game game = {};
     assert(game.state == GameState::Title);
     game.player.x = 123;
     game.player.y = 456;
-    game.player.facingX = -1;
-    game.player.facingY = 1;
+    setFacing(game.player, -1, 1);
     game.player.dashFrames = 3;
     game.player.slots[0] = {AbilityId::None, 17};
     game.player.slots[1] = {AbilityId::Dash, 29};
@@ -79,7 +107,7 @@ void testTitleAndReset() {
         game = title;
         const InputFrame start = {1, -1, (buttons & 1) != 0, (buttons & 2) != 0};
         updateGame(game, start);
-        assertFreshRun(game); // Neither movement nor Dash leaks through start.
+        assertFreshRun(game); // Кадр старта не запускает движение или Dash.
         updateGame(game, idle);
         assertFreshRun(game);
     }
@@ -107,7 +135,7 @@ void testWalking() {
                 assertSafe(game);
             }
             if (dx != 0 || dy != 0) {
-                assert(game.player.facingX == dx && game.player.facingY == dy);
+                assert(getFacingX(game.player) == dx && getFacingY(game.player) == dy);
                 const int distanceSquared = (dx * dx + dy * dy) * speed * speed;
                 const int error = WALK_SPEED * WALK_SPEED - distanceSquared;
                 assert(error >= 0 && error <= 2 * WALK_SPEED);
@@ -153,7 +181,7 @@ void testWraps() {
     }
 }
 
-// Independent oracle: translate obstacle rectangles, not the player's axes.
+// Независимая проверка: сдвигаем препятствия, а не координаты игрока.
 bool referenceBlocked(int x, int y) {
     const int size = PLAYER_SIZE * FIXED_ONE;
     for (unsigned i = 0; i < OBSTACLE_COUNT; ++i) {
@@ -198,7 +226,7 @@ void testObstacleAabb() {
         assert(!playerBlocked(normalized(left, ARENA_WIDTH_FIXED), top));
         assert(playerBlocked(normalized(left + 1, ARENA_WIDTH_FIXED), top + 1));
     }
-    // At x=124 the wrapped body just touches the obstacle at x=3.
+    // При x=124 игрок через край лишь касается препятствия с x=3.
     assert(!playerBlocked(124 * FIXED_ONE, 14 * FIXED_ONE));
     assert(playerBlocked(124 * FIXED_ONE + 1, 14 * FIXED_ONE));
     assert(playerBlocked(ARENA_WIDTH_FIXED - 1, 14 * FIXED_ONE));
@@ -217,7 +245,7 @@ void testObstacleAabb() {
 }
 
 void testSlidingAndDashCollision() {
-    // Approach each obstacle from all four faces, including the x=3 wrap copy.
+    // Подходим с четырёх сторон, включая переход через край к x=3.
     for (unsigned i = 0; i < OBSTACLE_COUNT; ++i) {
         const Obstacle obstacle = readObstacle(i);
         for (unsigned side = 0; side < 4; ++side) {
@@ -238,7 +266,7 @@ void testSlidingAndDashCollision() {
                 static_cast<int8_t>(horizontal ? 0 : direction), true, false
             };
             updateGame(game, dash);
-            // One complete substep is legal; the next would overlap by 13/16 pixel.
+            // Первый подшаг свободен, следующий зайдёт в стену на 13/16 пикселя.
             const int stopped = normalized(boundary - direction * 3, extent);
             assert(game.player.x == (horizontal ? stopped : x));
             assert(game.player.y == (horizontal ? y : stopped));
@@ -249,7 +277,7 @@ void testSlidingAndDashCollision() {
             updateGame(game, idle);
             assert(game.player.x == hit.x && game.player.y == hit.y);
 
-            // At the face, diagonal walking slides; diagonal Dash must stop both axes.
+            // Ходьба скользит вдоль стены, а Dash останавливается по обеим осям.
             const int16_t faceX = horizontal ? normalized(boundary, extent) : x;
             const int16_t faceY = horizontal ? y : normalized(boundary, extent);
             const InputFrame diagonal = {
@@ -269,7 +297,7 @@ void testSlidingAndDashCollision() {
             assert(game.player.dashFrames == 0);
             assertSafe(game);
 
-            // Repeated movement and fresh Dash attempts cannot cross a solid face.
+            // Повторные шаги и попытки Dash не должны проходить сквозь стену.
             InputFrame intoWall = dash;
             intoWall.activateA = false;
             for (unsigned frame = 0; frame < 2 * DASH_COOLDOWN; ++frame) {
@@ -290,7 +318,7 @@ void testDashMotion() {
             if (dx == 0 && dy == 0) {
                 continue;
             }
-            // Open six-tick paths, selected independently of the collision code.
+            // Свободные пути на шесть кадров выбраны без кода столкновений.
             const int y = dy == 0 || (dx == -1 && dy == -1) ? 45 :
                 (dx == -1 && dy == 1 ? 20 : (dx == 1 && dy == 1 ? 5 : 25));
             Game game = playingAt(60 * FIXED_ONE + 3, y * FIXED_ONE + 7);
@@ -304,7 +332,7 @@ void testDashMotion() {
                 updateGame(game, input);
                 assert(game.player.x == initial.x + tick * dx * speed);
                 assert(game.player.y == initial.y + tick * dy * speed);
-                assert(game.player.facingX == dx && game.player.facingY == dy);
+                assert(getFacingX(game.player) == dx && getFacingY(game.player) == dy);
                 assert(game.player.dashFrames == 6 - tick);
                 assert(game.player.slots[0].cooldown == DASH_COOLDOWN - tick + 1);
                 assertSafe(game);
@@ -322,7 +350,7 @@ void testDashMotion() {
             const int walkSpeed = dx != 0 && dy != 0 ? 11 : 16;
             assert(game.player.x == end.x - dx * walkSpeed);
             assert(game.player.y == end.y - dy * walkSpeed);
-            assert(game.player.facingX == -dx && game.player.facingY == -dy);
+            assert(getFacingX(game.player) == -dx && getFacingY(game.player) == -dy);
         }
     }
     Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
@@ -334,7 +362,7 @@ void testDashMotion() {
         updateGame(game, tick == 1 ? stationaryDash : idle);
         assert(game.player.x == x - tick * DASH_SPEED);
         assert(game.player.y == 45 * FIXED_ONE);
-        assert(game.player.facingX == -1 && game.player.facingY == 0);
+        assert(getFacingX(game.player) == -1 && getFacingY(game.player) == 0);
     }
 }
 
@@ -355,7 +383,7 @@ void testSlotsAndInputEdges() {
             updateGame(game, idle);
         }
         const Player end = game.player;
-        // Press once while cooling down, then simulate a held button with no edges.
+        // Нажимаем во время перезарядки, затем держим без новых нажатий.
         updateGame(game, pressIdle);
         assert(game.player.dashFrames == 0);
         assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 6);
@@ -375,7 +403,7 @@ void testSlotsAndInputEdges() {
         assert(game.player.slots[slot].cooldown == DASH_COOLDOWN);
         assert(game.player.slots[other].cooldown == 0);
 
-        // Both slots can contain Dash without sharing a cooldown or extending a burst.
+        // Два Dash имеют отдельные перезарядки и не продлевают текущий рывок.
         game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
         game.player.slots[0].ability = AbilityId::Dash;
         game.player.slots[1].ability = AbilityId::Dash;
@@ -410,7 +438,7 @@ void testSlotsAndInputEdges() {
         assert(game.player.slots[0].cooldown == 0 && game.player.slots[1].cooldown == 0);
     }
 
-    // Removing Dash from its starting slot leaves no hardcoded A/B action.
+    // После снятия Dash кнопки A/B не должны запускать скрытый рывок.
     Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
     game.player.slots[0].ability = AbilityId::None;
     for (unsigned buttons = 1; buttons <= 3; ++buttons) {
@@ -425,7 +453,7 @@ void testSlotsAndInputEdges() {
     assert(game.player.dashFrames == 0);
     assert(game.player.slots[0].cooldown == 0 && game.player.slots[1].cooldown == 0);
 
-    // Simultaneous ready slots cause one burst; the rejected activation is free.
+    // Два нажатия дают один рывок; отклонённый слот не уходит на перезарядку.
     for (unsigned abilities = 0; abilities < 4; ++abilities) {
         game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
         game.player.slots[0].ability = abilities & 1 ? AbilityId::Dash : AbilityId::None;
@@ -449,7 +477,7 @@ void testSlotsAndInputEdges() {
 }
 
 void testMapConnectivity() {
-    // Host-only bounded BFS over every integer-pixel top-left position on the torus.
+    // На ПК обходим позиции игрока по пикселям с учётом переходов через края.
     const unsigned cells = ARENA_WIDTH * ARENA_HEIGHT;
     bool visited[cells] = {};
     uint16_t queue[cells] = {};
@@ -502,7 +530,7 @@ void testRandomizedInput() {
             random ^= random << 13;
             random ^= random >> 17;
             random ^= random << 5;
-            // Keep directions for several frames so the sequence travels across the map.
+            // Держим направление несколько кадров, чтобы игрок двигался по карте.
             if (frame % 23 == 0) {
                 input.moveX = static_cast<int8_t>(static_cast<int>(random % 3) - 1);
                 input.moveY = static_cast<int8_t>(static_cast<int>((random >> 8) % 3) - 1);
@@ -535,9 +563,10 @@ void testRandomizedInput() {
                 movedTicks, dashTicks);
 }
 
-} // namespace
+} // Конец анонимного пространства имён.
 
 int main() {
+    testFacingPacking();
     testTitleAndReset();
     testWalking();
     testWraps();

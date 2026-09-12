@@ -6,19 +6,20 @@
 Arduboy2 arduboy;
 gc::Game game = {};
 
-// Keep standard boot recovery and USB upload support provided by Arduboy2.
+// Сохраняем штатную инициализацию, USB и режим восстановления Arduboy2.
 void setup() {
     arduboy.begin();
     arduboy.setFrameDuration(gc::FRAME_DURATION_MS);
     arduboy.setTextWrap(false);
 }
 
-// Poll once per accepted frame; one-shot actions receive edges, not held states.
+// Опрашиваем кнопки раз за кадр: движение по удержанию, способности по новому нажатию.
 void loop() {
     if (!arduboy.nextFrame()) {
         return;
     }
     arduboy.pollButtons();
+    // true = 1, false = 0: разность даёт -1/0/+1, противоположные кнопки гасят друг друга.
     const gc::InputFrame input = {
         static_cast<int8_t>(arduboy.pressed(RIGHT_BUTTON) - arduboy.pressed(LEFT_BUTTON)),
         static_cast<int8_t>(arduboy.pressed(DOWN_BUTTON) - arduboy.pressed(UP_BUTTON)),

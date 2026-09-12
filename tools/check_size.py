@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check linked AVR sizes; this does not measure peak runtime stack use."""
+"""Проверяем flash и статическую SRAM в ELF; пиковый размер стека сюда не входит."""
 
 import argparse
 import subprocess
@@ -14,7 +14,7 @@ def main():
 
     properties = subprocess.check_output(
         [args.cli, "compile", "--fqbn", "arduino:avr:leonardo",
-         "--show-properties=expanded", "GarbageCollector"], text=True
+         "--show-properties=expanded", "src"], text=True
     )
     compiler_path = next(
         line.partition("=")[2] for line in properties.splitlines()
