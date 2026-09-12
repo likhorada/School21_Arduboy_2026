@@ -114,6 +114,8 @@ void testTimerAndWaves() {
     updateGame(game, pressA);
     assert(game.state == GameState::Shop);
     updateGame(game, pressB);
+    assert(game.state == GameState::Shop && game.shop.category == ShopCategory::Active);
+    updateGame(game, pressB);
     assert(game.state == GameState::Playing && game.combat.currentStage == 1);
     assert(game.combat.currentWave == 0 && game.combat.stageTimer == 3750);
     parkAwayFromMarkers(game);
@@ -138,6 +140,7 @@ void testTimerAndWaves() {
             assert(game.state == GameState::StageCleared);
             updateGame(game, pressA);
             updateGame(game, pressB);
+            updateGame(game, pressB);
         }
     }
     assert(game.state == GameState::Win);
@@ -154,20 +157,15 @@ void testTimerAndWaves() {
 void testShop() {
     Game game = fixture();
     initShop(game);
+    assert(game.shop.category == ShopCategory::Passive && game.shop.selectedIndex == 0);
     updateGame(game, pressA);
-    assert(!game.shop.passiveBought && game.combat.playerScore == 0);
-    game.shop.selectedIndex = 3;
-    updateGame(game, pressA);
-    assert(!game.shop.choosingSlot);
+    assert(game.shop.category == ShopCategory::Passive && game.combat.playerScore == 0);
+
     game.combat.playerScore = 1000;
-    game.shop.selectedIndex = 0;
     updateGame(game, pressA);
-    assert(game.state == GameState::Shop && game.shop.passiveBought);
+    assert(game.state == GameState::Shop && game.shop.category == ShopCategory::Active);
     assert(game.passives.damageLevel == 1 && game.combat.playerScore == 900);
-    game.shop.selectedIndex = 1;
-    updateGame(game, pressA);
-    assert(game.player.maxHp == 4 && game.combat.playerScore == 900);
-    game.shop.selectedIndex = 3;
+
     updateGame(game, pressA);
     assert(game.shop.choosingSlot && game.combat.playerScore == 900);
     updateGame(game, {-1, 0, false, false, false, false});
@@ -176,30 +174,46 @@ void testShop() {
     updateGame(game, pressB);
     assert(game.player.slots[0].ability == AbilityId::Dash);
     assert(game.player.slots[1].ability == AbilityId::MarkAndSweep);
-    assert(game.shop.activeBought && game.combat.playerScore == 700);
-    game.shop.selectedIndex = 4;
-    updateGame(game, pressA);
-    assert(!game.shop.choosingSlot && game.combat.playerScore == 700);
-    updateGame(game, pressB);
-    assert(game.state == GameState::Playing);
+    assert(game.state == GameState::Playing && game.combat.playerScore == 700);
 
     initShop(game);
-    game.shop.selectedIndex = 4;
+    updateGame(game, pressB);
+    assert(game.shop.category == ShopCategory::Active);
+    game.shop.selectedIndex = 1;
     updateGame(game, pressA);
     updateGame(game, pressA);
     assert(game.player.slots[0].ability == AbilityId::StopTheWorld);
     assert(game.player.slots[1].ability == AbilityId::MarkAndSweep);
-    // Buying an active first still leaves the passive available.
+    assert(game.state == GameState::Playing && game.combat.playerScore == 500);
+
+    initShop(game);
     game.shop.selectedIndex = 2;
     updateGame(game, pressA);
     assert(game.passives.moveSpeedLevel == 1 && game.combat.playerScore == 400);
+    assert(game.shop.category == ShopCategory::Active);
+    updateGame(game, pressB);
+    assert(game.state == GameState::Playing);
+
     initShop(game);
-    const InputFrame down = {0, 1, false, false, false, false};
-    for (unsigned i = 0; i < 10; ++i) updateGame(game, down);
+    const InputFrame right = {1, 0, false, false, false, false};
+    const InputFrame left = {-1, 0, false, false, false, false};
+    for (unsigned i = 0; i < 10; ++i) updateGame(game, right);
     assert(game.shop.selectedIndex == 1);
     updateGame(game, idle);
-    updateGame(game, down);
+    updateGame(game, right);
     assert(game.shop.selectedIndex == 2);
+    updateGame(game, idle);
+    updateGame(game, right);
+    assert(game.shop.selectedIndex == 0);
+    updateGame(game, idle);
+    updateGame(game, left);
+    assert(game.shop.selectedIndex == 2);
+
+    // Недостаток денег блокирует активку, но оставляет карточку доступной.
+    game.combat.playerScore = 0;
+    updateGame(game, pressB);
+    updateGame(game, pressA);
+    assert(game.state == GameState::Shop && !game.shop.choosingSlot);
 
     for (unsigned i = 0; i < 3; ++i) {
         initShop(game);
@@ -208,6 +222,7 @@ void testShop() {
         updateGame(game, pressA);
         assert(game.player.maxHp == (i == 0 ? 5 : 6));
         assert(game.combat.playerScore == (i < 2 ? 900 : 1000));
+        assert(game.shop.category == (i < 2 ? ShopCategory::Active : ShopCategory::Passive));
     }
     for (uint8_t hp = 0; hp <= 6; ++hp) {
         for (uint8_t i = 0; i < 4; ++i)

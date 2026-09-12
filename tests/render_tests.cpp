@@ -20,19 +20,32 @@ int main() {
         renderGame(display, game);
     }
     initShop(game);
-    for (uint8_t selected = 0; selected <= 6; ++selected) {
-        game.shop.selectedIndex = selected;
-        for (uint8_t bought = 0; bought < 2; ++bought) {
-            game.shop.passiveBought = game.shop.activeBought = bought;
+    for (uint8_t category = 0; category < 2; ++category) {
+        game.shop.category = static_cast<ShopCategory>(category);
+        for (uint8_t selected = 0; selected < 3; ++selected) {
+            game.shop.selectedIndex = selected;
+            game.combat.playerScore = 0;
             renderGame(display, game);
-        }
-        if (selected >= 3 && selected < 6) {
-            game.shop.choosingSlot = true;
-            for (uint8_t id = 0; id <= 4; ++id) {
-                game.player.slots[0].ability = game.player.slots[1].ability = static_cast<AbilityId>(id);
+            assert(std::strncmp(&display.text[0][3], category ? "ACTIVE UPGRADE" : "PASSIVE UPGRADE",
+                                category ? 14 : 15) == 0);
+            assert(display.text[7][8] == '1' + selected);
+            assert(std::strncmp(&display.text[6][7], "X FUNDS", 7) == 0);
+            game.combat.playerScore = 1000;
+            renderGame(display, game);
+            if (category) {
+                game.shop.choosingSlot = true;
+                for (uint8_t id = 0; id <= 4; ++id) {
+                    game.player.slots[0].ability = game.player.slots[1].ability = static_cast<AbilityId>(id);
+                    renderGame(display, game);
+                }
+                game.shop.choosingSlot = false;
+            } else {
+                game.passives.damageLevel = 3;
+                game.player.maxHp = PLAYER_MAX_HP_CAP;
+                game.passives.moveSpeedLevel = 3;
                 renderGame(display, game);
+                assert(std::strncmp(&display.text[6][8], "X MAX", 5) == 0);
             }
-            game.shop.choosingSlot = false;
         }
     }
     game.state = GameState::Playing;

@@ -281,6 +281,74 @@ void drawHeart(Arduboy2 &arduboy, int16_t x, int16_t y, const uint8_t *bitmap) {
   }
 }
 
+void drawShopHeader(Arduboy2 &arduboy, const Game &game) {
+  const bool passive = game.shop.category == ShopCategory::Passive;
+  arduboy.setCursor(19, 0);
+  arduboy.print(passive ? F("PASSIVE UPGRADE") : F("ACTIVE UPGRADE"));
+  arduboy.setCursor(92, 8);
+  arduboy.print(F("$"));
+  arduboy.print(game.combat.playerScore);
+}
+
+bool passiveAtCap(const Game &game, PassiveId id) {
+  switch (id) {
+  case PassiveId::DamageUp:
+    return game.passives.damageLevel >= 3;
+  case PassiveId::MaxHpUp:
+    return game.player.maxHp >= PLAYER_MAX_HP_CAP;
+  case PassiveId::MoveSpeedUp:
+    return game.passives.moveSpeedLevel >= 3;
+  default:
+    return true;
+  }
+}
+
+void drawPassiveCard(Arduboy2 &arduboy, PassiveId id) {
+  arduboy.setCursor(43, 16);
+  switch (id) {
+  case PassiveId::DamageUp:
+    arduboy.print(F("DAMAGE"));
+    arduboy.setCursor(31, 24);
+    arduboy.print(F("SHOT DMG +1"));
+    break;
+  case PassiveId::MaxHpUp:
+    arduboy.print(F("MAX HP"));
+    arduboy.setCursor(28, 24);
+    arduboy.print(F("HP+1 HEAL+1"));
+    break;
+  case PassiveId::MoveSpeedUp:
+    arduboy.print(F("SPEED"));
+    arduboy.setCursor(34, 24);
+    arduboy.print(F("MOVE +2/16"));
+    break;
+  default:
+    break;
+  }
+}
+
+void drawActiveCard(Arduboy2 &arduboy, ActiveUpgradeId id) {
+  arduboy.setCursor(43, 16);
+  switch (id) {
+  case ActiveUpgradeId::MarkAndSweep:
+    arduboy.print(F("SWEEP"));
+    arduboy.setCursor(25, 24);
+    arduboy.print(F("DMG4 R24 CD3S"));
+    break;
+  case ActiveUpgradeId::StopTheWorld:
+    arduboy.print(F("FREEZE"));
+    arduboy.setCursor(22, 24);
+    arduboy.print(F("FREEZE90F CD4S"));
+    break;
+  case ActiveUpgradeId::Compact:
+    arduboy.print(F("COMPACT"));
+    arduboy.setCursor(16, 24);
+    arduboy.print(F("DROPS SH60F CD3S"));
+    break;
+  default:
+    break;
+  }
+}
+
 // Рисуем правую колонку UI (x=104, 6 строк по 8px)
 // Строка 0: lvl<N>
 // Строка 1: 4 сердечка HP (+ подсветка 5-6)
@@ -418,16 +486,12 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   }
 
   if (game.state == GameState::Shop) {
-    arduboy.setCursor(0, 0);
-    arduboy.print(F("SHOP $"));
-    arduboy.print(game.combat.playerScore);
+    drawShopHeader(arduboy, game);
     if (game.shop.choosingSlot) {
       arduboy.setCursor(0, 16);
-      arduboy.print(F("Equip "));
-      printAbility(
-          arduboy,
-          static_cast<AbilityId>(
-              game.shop.activeChoices[game.shop.selectedIndex - 3] + 1));
+      arduboy.print(F("EQUIP "));
+      printAbility(arduboy, abilityFromUpgrade(static_cast<ActiveUpgradeId>(
+                                game.shop.activeChoices[game.shop.selectedIndex])));
       arduboy.setCursor(0, 24);
       arduboy.print(F("A: "));
       printAbility(arduboy, game.player.slots[0].ability);
@@ -435,54 +499,35 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
       arduboy.print(F("B: "));
       printAbility(arduboy, game.player.slots[1].ability);
       arduboy.setCursor(0, 48);
-      arduboy.print(F("A/B REPLACE $"));
-      arduboy.print(ACTIVE_PRICE);
+      arduboy.print(F("A->A B->B"));
       arduboy.setCursor(0, 56);
-      arduboy.print(F("LEFT CANCEL"));
+      arduboy.print(F("< CANCEL"));
       return;
     }
-    const bool activePage =
-        game.shop.selectedIndex >= 3 && game.shop.selectedIndex < 6;
-    arduboy.setCursor(0, 8);
-    arduboy.print(activePage ? F("ACTIVE $") : F("PASSIVE $"));
-    arduboy.print(activePage ? ACTIVE_PRICE : PASSIVE_PRICE);
-    const bool bought =
-        activePage ? game.shop.activeBought : game.shop.passiveBought;
-    if (bought)
-      arduboy.print(F(" BOUGHT"));
-    for (uint8_t i = 0; i < 3; ++i) {
-      arduboy.setCursor(0, 16 + i * 8);
-      if (i + (activePage ? 3 : 0) == game.shop.selectedIndex)
-        arduboy.print(F("> "));
-      else
-        arduboy.print(F("  "));
-      if (activePage) {
-        printAbility(arduboy,
-                     static_cast<AbilityId>(game.shop.activeChoices[i] + 1));
-        continue;
-      }
-      switch (static_cast<PassiveId>(game.shop.passiveChoices[i])) {
-      case PassiveId::DamageUp:
-        arduboy.print(F("DMG Up"));
-        break;
-      case PassiveId::MaxHpUp:
-        arduboy.print(F("Max HP Up"));
-        break;
-      case PassiveId::MoveSpeedUp:
-        arduboy.print(F("Speed Up"));
-        break;
-      default:
-        arduboy.print(F("?"));
-        break;
-      }
+    const bool active = game.shop.category == ShopCategory::Active;
+    const uint8_t choice = active
+        ? game.shop.activeChoices[game.shop.selectedIndex]
+        : game.shop.passiveChoices[game.shop.selectedIndex];
+    if (active)
+      drawActiveCard(arduboy, static_cast<ActiveUpgradeId>(choice));
+    else
+      drawPassiveCard(arduboy, static_cast<PassiveId>(choice));
+
+    const uint16_t price = active ? ACTIVE_PRICE : PASSIVE_PRICE;
+    arduboy.setCursor(52, 40);
+    arduboy.print(F("$"));
+    arduboy.print(price);
+    if (game.combat.playerScore < price) {
+      arduboy.setCursor(43, 48);
+      arduboy.print(F("X FUNDS"));
+    } else if (!active && passiveAtCap(game, static_cast<PassiveId>(choice))) {
+      arduboy.setCursor(49, 48);
+      arduboy.print(F("X MAX"));
     }
-    arduboy.setCursor(0, 40);
-    arduboy.print(game.shop.selectedIndex == 6 ? F("> Next / Skip")
-                                               : F("  Next / Skip"));
-    arduboy.setCursor(0, 48);
-    arduboy.print(F("UP/DOWN: ALL 6 ITEMS"));
-    arduboy.setCursor(0, 56);
-    arduboy.print(F("A BUY / B NEXT"));
+    arduboy.setCursor(4, 56);
+    arduboy.print(F("A BUY  <"));
+    arduboy.print(game.shop.selectedIndex + 1);
+    arduboy.print(F("/3>  B SKIP"));
     return;
   }
 

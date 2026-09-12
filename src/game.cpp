@@ -120,30 +120,42 @@ void startGame(Game& game) {
 void initShop(Game& game) {
     game.state = GameState::Shop;
     game.shop = {};
-    for (uint8_t i = 0; i < 3; ++i) {
+    for (uint8_t i = 0; i < SHOP_PASSIVE_CHOICES; ++i) {
         game.shop.passiveChoices[i] = i + 1;
+    }
+    for (uint8_t i = 0; i < SHOP_ACTIVE_CHOICES; ++i) {
         game.shop.activeChoices[i] = i + 1;
+    }
+}
+
+void finishShop(Game& game) {
+    ++game.combat.currentStage;
+    game.combat.currentWave = 0;
+    game.combat.stageCleared = false;
+    game.combat.waveCompleted = false;
+    game.combat.stageTimer = STAGE_TIME_FRAMES;
+    game.combat.spawnTimer = SPAWN_DELAY_FRAMES;
+    game.combat.freezeFrames = 0;
+    game.combat.burstShots = 0;
+    game.player.dashFrames = 0;
+    game.state = GameState::Playing;
+}
+
+void finishShopCategory(Game& game) {
+    if (game.shop.category == ShopCategory::Passive) {
+        game.shop.category = ShopCategory::Active;
+        game.shop.selectedIndex = 0;
+        game.shop.previousMoveX = 0;
+    } else {
+        finishShop(game);
     }
 }
 
 void applyShopChoice(Game& game) {
     if (game.state != GameState::Shop || game.shop.choosingSlot) return;
     const uint8_t idx = game.shop.selectedIndex;
-    if (idx == 6) {
-        ++game.combat.currentStage;
-        game.combat.currentWave = 0;
-        game.combat.stageCleared = false;
-        game.combat.waveCompleted = false;
-        game.combat.stageTimer = STAGE_TIME_FRAMES;
-        game.combat.spawnTimer = SPAWN_DELAY_FRAMES;
-        game.combat.freezeFrames = 0;
-        game.combat.burstShots = 0;
-        game.player.dashFrames = 0;
-        game.state = GameState::Playing;
-        return;
-    }
-    if (idx < 3) {
-        if (game.shop.passiveBought || game.combat.playerScore < PASSIVE_PRICE) return;
+    if (game.shop.category == ShopCategory::Passive) {
+        if (game.combat.playerScore < PASSIVE_PRICE) return;
         switch (static_cast<PassiveId>(game.shop.passiveChoices[idx])) {
         case PassiveId::DamageUp:
             if (game.passives.damageLevel == 3) return;
@@ -162,8 +174,8 @@ void applyShopChoice(Game& game) {
         default: return;
         }
         game.combat.playerScore -= PASSIVE_PRICE;
-        game.shop.passiveBought = true;
-    } else if (idx < 6 && !game.shop.activeBought && game.combat.playerScore >= ACTIVE_PRICE) {
+        finishShopCategory(game);
+    } else if (game.combat.playerScore >= ACTIVE_PRICE) {
         game.shop.choosingSlot = true;
     }
 }
@@ -174,21 +186,29 @@ void updateShop(Game& game, const InputFrame& input) {
             game.shop.choosingSlot = false;
         } else if (input.activateA || input.activateB) {
             const uint8_t slot = input.activateA ? 0 : 1;
-            const uint8_t choice = game.shop.activeChoices[game.shop.selectedIndex - 3];
-            game.player.slots[slot] = {static_cast<AbilityId>(choice + 1), 0};
+            const ActiveUpgradeId choice = static_cast<ActiveUpgradeId>(
+                game.shop.activeChoices[game.shop.selectedIndex]);
+            game.player.slots[slot] = {abilityFromUpgrade(choice), 0};
             game.combat.playerScore -= ACTIVE_PRICE;
-            game.shop.activeBought = true;
             game.shop.choosingSlot = false;
+            finishShopCategory(game);
         }
     } else {
-        if (input.moveY != game.shop.previousMoveY) {
-            if (input.moveY < 0 && game.shop.selectedIndex > 0) --game.shop.selectedIndex;
-            if (input.moveY > 0 && game.shop.selectedIndex < 6) ++game.shop.selectedIndex;
+        if (input.moveX != game.shop.previousMoveX) {
+            if (input.moveX < 0) {
+                game.shop.selectedIndex = game.shop.selectedIndex == 0
+                    ? SHOP_PASSIVE_CHOICES - 1 : game.shop.selectedIndex - 1;
+            } else if (input.moveX > 0) {
+                game.shop.selectedIndex = (game.shop.selectedIndex + 1) % SHOP_PASSIVE_CHOICES;
+            }
         }
-        if (input.activateB) game.shop.selectedIndex = 6;
-        if (input.activateA || input.activateB) applyShopChoice(game);
+        if (input.activateB) {
+            finishShopCategory(game);
+        } else if (input.activateA) {
+            applyShopChoice(game);
+        }
     }
-    game.shop.previousMoveY = input.moveY;
+    game.shop.previousMoveX = input.moveX;
 }
 
 void updateGame(Game& game, const InputFrame& input) {

@@ -32,6 +32,12 @@ enum class PassiveId : uint8_t { None, DamageUp, MaxHpUp, MoveSpeedUp };
 // Активные апгрейды (покупаются в магазине)
 enum class ActiveUpgradeId : uint8_t { None, MarkAndSweep, StopTheWorld, Compact };
 
+enum class ShopCategory : uint8_t { Passive, Active };
+
+inline AbilityId abilityFromUpgrade(ActiveUpgradeId id) {
+    return static_cast<AbilityId>(static_cast<uint8_t>(id) + 1);
+}
+
 // Слот активки: какая способность + кулдаун
 struct ActiveSlot {
     AbilityId ability;
@@ -87,15 +93,14 @@ struct PlayerPassives {
     uint8_t moveSpeedLevel;   // 0-3: +скорость за уровень
 };
 
-// Магазин: выбор апгрейда
+// Магазин: одна из трёх карточек текущей категории.
 struct ShopState {
-    uint8_t selectedIndex;        // 0-5: 0-2 пассивки, 3-5 активки, 6 = Skip
-    uint8_t passiveChoices[3];    // PassiveId для 3 вариантов
-    uint8_t activeChoices[3];     // ActiveUpgradeId для 3 вариантов
-    bool passiveBought;
-    bool activeBought;
+    uint8_t selectedIndex;        // 0-2: текущая карточка карусели
+    uint8_t passiveChoices[SHOP_PASSIVE_CHOICES];
+    uint8_t activeChoices[SHOP_ACTIVE_CHOICES];
+    ShopCategory category;
     bool choosingSlot;
-    int8_t previousMoveY;
+    int8_t previousMoveX;
 };
 
 struct MenuState {
