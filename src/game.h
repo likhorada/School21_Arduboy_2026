@@ -5,7 +5,18 @@
 
 namespace gc {
 
-enum class GameState : uint8_t { Title, Playing, Paused, Shop, StageCleared, GameOver, Win };
+enum class GameState : uint8_t {
+    Intro,
+    Menu,
+    About,
+    SoundMenu,
+    Playing,
+    Paused,
+    Shop,
+    StageCleared,
+    GameOver,
+    Win
+};
 enum class AbilityId : uint8_t { None, Dash, MarkAndSweep, StopTheWorld, Compact };
 inline uint8_t abilityCooldown(AbilityId id) {
     return id == AbilityId::None ? 0 : (id == AbilityId::MarkAndSweep ? 180 :
@@ -87,6 +98,11 @@ struct ShopState {
     int8_t previousMoveY;
 };
 
+struct MenuState {
+    uint8_t selectedIndex;
+    int8_t previousMoveY;
+};
+
 // Единственный владелец состояния игры: без дубликатов игрока и боевых пулов.
 struct Game {
     GameState state;
@@ -94,6 +110,9 @@ struct Game {
     PlayerPassives passives;
     Combat combat;
     ShopState shop;
+    MenuState menu;
+    MenuState soundMenu;
+    uint8_t soundEnabled;
     uint8_t pauseHoldFrames;  // Счётчик удержания A+B для паузы
 };
 
@@ -124,7 +143,8 @@ void updateGame(Game& game, const InputFrame& input);
 
 #ifdef __AVR__
 static_assert(sizeof(Player) == 13, "Packed player must use 13 AVR bytes");
-static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) + sizeof(ShopState) + 1,
+static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) +
+                              sizeof(ShopState) + sizeof(MenuState) * 2 + 2,
               "Unexpected AVR game layout");
 #endif
 

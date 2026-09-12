@@ -1,0 +1,4 @@
+/build/
+assets/*.h
+tools/__pycache__/
+*.pyc

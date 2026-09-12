@@ -1,6 +1,14 @@
 #include "render.h"
 
 #include "arena.h"
+#include "assets/intro.h"
+#include "assets/mainmenu_about.h"
+#include "assets/mainmenu_exit.h"
+#include "assets/mainmenu_play.h"
+#include "assets/mainmenu_sound.h"
+#include "assets/soundmenu_exit.h"
+#include "assets/soundmenu_off.h"
+#include "assets/soundmenu_on.h"
 #include "stages.h"
 #include <Arduboy2.h>
 
@@ -373,17 +381,39 @@ void drawUIColumn(Arduboy2 &arduboy, const Game &game) {
 void renderGame(Arduboy2 &arduboy, const Game &game) {
   arduboy.clear();
   arduboy.setTextWrap(false);
-  if (game.state == GameState::Title) {
-    arduboy.setCursor(16, 5);
-    arduboy.print(F("GARBAGE COLLECTOR"));
-    arduboy.setCursor(31, 21);
-    arduboy.print(F("CLEAR WAVES"));
-    arduboy.setCursor(10, 33);
-    arduboy.print(F("D-PAD MOVE"));
-    arduboy.setCursor(0, 43);
-    arduboy.print(F("AUTO FIRE / A-B SKILL"));
-    arduboy.setCursor(28, 55);
-    arduboy.print(F("A/B TO START"));
+  if (game.state == GameState::Intro) {
+    arduboy.drawBitmap(0, 0, intro_bitmap, 128, 64, WHITE);
+    return;
+  }
+
+  if (game.state == GameState::Menu) {
+    const uint8_t *frames[] = {
+        mainmenu_play_bitmap,
+        mainmenu_about_bitmap,
+        mainmenu_sound_bitmap,
+        mainmenu_exit_bitmap,
+    };
+    arduboy.drawBitmap(0, 0, frames[game.menu.selectedIndex], 128, 64, WHITE);
+    return;
+  }
+
+  if (game.state == GameState::SoundMenu) {
+    const uint8_t *frames[] = {
+        soundmenu_on_bitmap,
+        soundmenu_off_bitmap,
+        soundmenu_exit_bitmap,
+    };
+    arduboy.drawBitmap(0, 0, frames[game.soundMenu.selectedIndex], 128, 64, WHITE);
+    return;
+  }
+
+  if (game.state == GameState::About) {
+    arduboy.setCursor(40, 12);
+    arduboy.print(F("made for"));
+    arduboy.setCursor(40, 28);
+    arduboy.print(F("school21"));
+    arduboy.setCursor(28, 44);
+    arduboy.print(F("ardujam 2026"));
     return;
   }
 
@@ -467,7 +497,7 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
     arduboy.print(F("SCORE: "));
     arduboy.print(game.combat.playerScore);
     arduboy.setCursor(10, 56);
-    arduboy.print(F("A/B TO TITLE"));
+    arduboy.print(F("A/B TO MENU"));
     return;
   }
 

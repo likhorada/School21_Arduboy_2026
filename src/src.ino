@@ -11,6 +11,7 @@ void setup() {
     arduboy.begin();
     arduboy.setFrameDuration(gc::FRAME_DURATION_MS);
     arduboy.setTextWrap(false);
+    game.soundEnabled = arduboy.audio.enabled();
 }
 
 // Опрашиваем кнопки раз за кадр: движение по удержанию, способности по новому нажатию.
@@ -28,7 +29,13 @@ void loop() {
         arduboy.pressed(A_BUTTON),
         arduboy.pressed(B_BUTTON),
     };
+    const uint8_t previousSoundEnabled = game.soundEnabled;
     gc::updateGame(game, input);
+    if (game.soundEnabled != previousSoundEnabled) {
+        if (game.soundEnabled) arduboy.audio.on();
+        else arduboy.audio.off();
+        arduboy.audio.saveOnOff();
+    }
     gc::renderGame(arduboy, game);
     arduboy.display();
 }

@@ -86,40 +86,74 @@ void testFacingPacking() {
     }
 }
 
-void testTitleAndReset() {
+void testIntroMenuAndReset() {
     Game game = {};
-    assert(game.state == GameState::Title);
+    assert(game.state == GameState::Intro);
     game.player.x = 123;
     game.player.y = 456;
     setFacing(game.player, -1, 1);
     game.player.dashFrames = 3;
     game.player.slots[0] = {AbilityId::None, 17};
     game.player.slots[1] = {AbilityId::Dash, 29};
-    const Game title = game;
+    const Game intro = game;
     for (unsigned frame = 0; frame < 300; ++frame) {
-        const InputFrame movement = {
-            static_cast<int8_t>(static_cast<int>(frame % 3) - 1),
-            static_cast<int8_t>(static_cast<int>((frame / 3) % 3) - 1),
-            false, false, false, false
-        };
-        updateGame(game, movement);
-        assert(game.state == GameState::Title);
-        assertSamePlayer(game.player, title.player);
-    }
-    for (unsigned buttons = 1; buttons <= 3; ++buttons) {
-        game = title;
-        const InputFrame start = {1, -1, (buttons & 1) != 0, (buttons & 2) != 0, false, false};
-        updateGame(game, start);
-        assertFreshRun(game); // Кадр старта не запускает движение или Dash.
         updateGame(game, idle);
-        assertFreshRun(game);
+        assert(game.state == GameState::Intro);
+        assertSamePlayer(game.player, intro.player);
     }
-    game = title;
-    game.state = GameState::Playing;
+    updateGame(game, {0, 0, true, false, false, false});
+    assert(game.state == GameState::Menu && game.menu.selectedIndex == 0);
+    updateGame(game, idle);
+    updateGame(game, {0, 0, true, false, false, false});
+    assertFreshRun(game);
+
+    game = intro;
     startGame(game);
     assertFreshRun(game);
     startGame(game);
     assertFreshRun(game);
+}
+
+void testMainMenu() {
+    const InputFrame pressA = {0, 0, true, false, false, false};
+    const InputFrame pressB = {0, 0, false, true, false, false};
+    const InputFrame down = {0, 1, false, false, false, false};
+    Game game = {};
+
+    updateGame(game, pressA);
+    assert(game.state == GameState::Menu && game.menu.selectedIndex == 0);
+
+    updateGame(game, down);
+    assert(game.menu.selectedIndex == 1);
+    updateGame(game, down); // Held direction does not repeat.
+    assert(game.menu.selectedIndex == 1);
+    updateGame(game, idle);
+    updateGame(game, pressA);
+    assert(game.state == GameState::About);
+    updateGame(game, pressB);
+    assert(game.state == GameState::Menu);
+
+    updateGame(game, down);
+    assert(game.menu.selectedIndex == 2);
+    updateGame(game, idle);
+    updateGame(game, pressA);
+    assert(game.state == GameState::SoundMenu);
+    updateGame(game, pressA);
+    assert(game.soundEnabled == 1);
+    updateGame(game, down);
+    updateGame(game, idle);
+    updateGame(game, pressA);
+    assert(game.soundEnabled == 0);
+    updateGame(game, down);
+    updateGame(game, idle);
+    updateGame(game, pressA);
+    assert(game.state == GameState::Menu);
+
+    updateGame(game, down);
+    assert(game.menu.selectedIndex == 3);
+    updateGame(game, idle);
+    updateGame(game, pressA);
+    assert(game.state == GameState::Intro);
 }
 
 void testWalking() {
@@ -649,7 +683,8 @@ void testPause() {
 
 int main() {
     testFacingPacking();
-    testTitleAndReset();
+    testIntroMenuAndReset();
+    testMainMenu();
     testWalking();
     testWraps();
     testObstacleAabb();

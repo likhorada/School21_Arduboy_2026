@@ -5,6 +5,24 @@
 namespace gc {
 namespace {
 
+constexpr uint8_t MAIN_MENU_ITEM_COUNT = 4;
+constexpr uint8_t SOUND_MENU_ITEM_COUNT = 3;
+
+bool anyMenuButton(const InputFrame& input) {
+    return input.activateA || input.activateB || input.moveX || input.moveY;
+}
+
+void updateSelection(MenuState& menu, int8_t moveY, uint8_t itemCount) {
+    if (moveY != menu.previousMoveY) {
+        if (moveY < 0) {
+            menu.selectedIndex = menu.selectedIndex ? menu.selectedIndex - 1 : itemCount - 1;
+        } else if (moveY > 0) {
+            menu.selectedIndex = menu.selectedIndex + 1 == itemCount ? 0 : menu.selectedIndex + 1;
+        }
+    }
+    menu.previousMoveY = moveY;
+}
+
 void activateAbility(Game& game, ActiveSlot& slot) {
     Player& player = game.player;
     if (slot.cooldown || slot.ability == AbilityId::None) return;
@@ -87,8 +105,10 @@ void movePlayer(Game& game, int8_t dx, int8_t dy, bool dashing) {
 } // namespace
 
 void startGame(Game& game) {
+    const uint8_t soundEnabled = game.soundEnabled;
     game = {};
     game.state = GameState::Playing;
+    game.soundEnabled = soundEnabled;
     game.player.x = PLAYER_START_X * FIXED_ONE;
     game.player.y = PLAYER_START_Y * FIXED_ONE;
     setFacing(game.player, 1, 0);
@@ -179,12 +199,54 @@ void updateGame(Game& game, const InputFrame& input) {
         game.pauseHoldFrames = 0;
     }
 
-    if (game.state == GameState::Title) {
-        if (input.activateA || input.activateB) startGame(game);
+    if (game.state == GameState::Intro) {
+        if (anyMenuButton(input)) {
+            game.state = GameState::Menu;
+            game.menu = {};
+        }
+        return;
+    }
+    if (game.state == GameState::Menu) {
+        updateSelection(game.menu, input.moveY, MAIN_MENU_ITEM_COUNT);
+        if (input.activateA) {
+            switch (game.menu.selectedIndex) {
+            case 0:
+                startGame(game);
+                break;
+            case 1:
+                game.state = GameState::About;
+                break;
+            case 2:
+                game.state = GameState::SoundMenu;
+                game.soundMenu = {};
+                break;
+            default:
+                game.menu = {};
+                game.state = GameState::Intro;
+                break;
+            }
+        }
+        return;
+    }
+    if (game.state == GameState::About) {
+        if (anyMenuButton(input)) game.state = GameState::Menu;
+        return;
+    }
+    if (game.state == GameState::SoundMenu) {
+        updateSelection(game.soundMenu, input.moveY, SOUND_MENU_ITEM_COUNT);
+        if (input.activateB) {
+            game.state = GameState::Menu;
+        } else if (input.activateA) {
+            if (game.soundMenu.selectedIndex < 2) {
+                game.soundEnabled = game.soundMenu.selectedIndex == 0;
+            } else {
+                game.state = GameState::Menu;
+            }
+        }
         return;
     }
     if (game.state == GameState::GameOver || game.state == GameState::Win) {
-        if (input.activateA || input.activateB) game.state = GameState::Title;
+        if (input.activateA || input.activateB) game.state = GameState::Menu;
         return;
     }
     if (game.state == GameState::Shop) {

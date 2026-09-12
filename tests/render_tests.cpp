@@ -82,16 +82,16 @@ int main() {
         game.player.slots[0].ability = static_cast<AbilityId>(id);
         game.player.slots[0].cooldown = abilityCooldown(game.player.slots[0].ability);
         renderGame(display, game);
-        assert(display.pixels[33][UI_COLUMN_X + 7] == WHITE);
-        assert(display.pixels[33][UI_COLUMN_X + 23] == BLACK);
-        assert(display.pixels[34][UI_COLUMN_X + 9] == BLACK);
+        assert(display.pixels[34][UI_COLUMN_X + 7] == WHITE);
+        assert(display.pixels[34][UI_COLUMN_X + 23] == BLACK);
+        assert(display.pixels[35][UI_COLUMN_X + 9] == BLACK);
         game.player.slots[0].cooldown = 0;
         renderGame(display, game);
         assert(display.pixels[34][127 - 1] == WHITE);
     }
     game.combat.scoreOrbs[0] = {70 * FIXED_ONE, 20 * FIXED_ONE, 5, 1};
     renderGame(display, game);
-    const uint8_t coinShape[] = {14, 21, 21, 21, 14};
+    const uint8_t coinShape[] = {14, 23, 23, 31, 14};
     for (uint8_t row = 0; row < 5; ++row)
         for (uint8_t col = 0; col < 5; ++col)
             assert(display.pixels[18 + row][68 + col] ==

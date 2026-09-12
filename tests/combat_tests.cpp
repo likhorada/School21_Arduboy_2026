@@ -65,6 +65,8 @@ void testTimerAndWaves() {
     assert(remainingSeconds(63) == 1 && remainingSeconds(62) == 0);
     Game game = {};
     updateGame(game, pressA);
+    assert(game.state == GameState::Menu);
+    updateGame(game, pressA);
     assert(game.player.hp == 4 && game.player.maxHp == 4);
     assert(game.player.slots[0].ability == AbilityId::Dash);
     assert(game.player.slots[1].ability == AbilityId::None);
@@ -143,8 +145,9 @@ void testTimerAndWaves() {
     updateGame(game, idle);
     assert(std::memcmp(&game, &won, sizeof(Game)) == 0);
     updateGame(game, pressA);
-    assert(game.state == GameState::Title);
-    updateGame(game, pressB);
+    assert(game.state == GameState::Menu);
+    updateGame(game, pressA);
+    assert(game.state == GameState::Playing);
     assert(game.combat.currentStage == 0 && game.combat.playerScore == 0);
 }
 
@@ -236,7 +239,7 @@ void testContactAndSpawns() {
     updateGame(game, idle);
     assert(std::memcmp(&game, &dead, sizeof(Game)) == 0);
     updateGame(game, pressB);
-    assert(game.state == GameState::Title);
+    assert(game.state == GameState::Menu);
 
     for (unsigned axis = 0; axis < 2; ++axis) {
         for (int direction = -1; direction <= 1; direction += 2) {
@@ -531,7 +534,7 @@ const InputFrame input = {int8_t(int(rng % 3) - 1), int8_t(int((rng >> 8) % 3) -
                                    frame % 251 == 0, frame % 137 == 0, false, false};
         if (game.state == GameState::GameOver) ++deaths;
         if (game.state == GameState::Playing) updateGame(game, input);
-        else updateGame(game, pressB);
+        else startGame(game);
         assert(game.combat.stageTimer <= STAGE_TIME_FRAMES);
         assert(game.player.hp <= game.player.maxHp && game.player.maxHp <= 6);
         if (game.state == GameState::Playing) {

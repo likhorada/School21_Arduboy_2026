@@ -4,8 +4,12 @@
 #include <cstdio>
 #include <cstring>
 
+#ifndef PROGMEM
 #define PROGMEM
+#endif
+#ifndef pgm_read_byte
 #define pgm_read_byte(addr) (*(const uint8_t*)(addr))
+#endif
 #define F(text) (text)
 constexpr uint8_t WHITE = 1, BLACK = 0;
 
@@ -41,6 +45,13 @@ public:
             drawPixel(x, y + yy, color);
             drawPixel(x + w - 1, y + yy, color);
         }
+    }
+    void drawBitmap(int16_t x, int16_t y, const uint8_t* bitmap,
+                    uint8_t w, uint8_t h, uint8_t color = WHITE) {
+        for (uint8_t yy = 0; yy < h; ++yy)
+            for (uint8_t xx = 0; xx < w; ++xx)
+                if (pgm_read_byte(bitmap + (yy / 8) * w + xx) & (1 << (yy & 7)))
+                    drawPixel(x + xx, y + yy, color);
     }
     void print(char c) {
         assert(cursorX >= 0 && cursorX + 6 <= 128 && cursorY >= 0 && cursorY + 8 <= 64);
