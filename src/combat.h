@@ -11,10 +11,9 @@ constexpr uint8_t AUDIO_EVENT_COIN = 1 << 1;
 // Пуля: летит по прямой. Координаты и скорости в единицах 1/16 пикселя.
 // framesLeft == 0 означает пустой слот.
 struct Projectile {
-    int16_t x;
-    int16_t y;
-    int8_t velocityX;
-    int8_t velocityY;
+    uint8_t x2;
+    uint8_t y2;
+    uint8_t directionAndDamage;
     uint8_t framesLeft;
 };
 
@@ -22,7 +21,6 @@ struct Projectile {
 struct Combat {
     Projectile projectiles[MAX_PROJECTILES];
     uint8_t shotCooldown;
-    uint8_t burstShots;         // Выпущенные пули текущей очереди (0 = новый заход)
     
     // Экземпляры врагов
     Enemy enemies[MAX_ENEMIES];
@@ -37,7 +35,16 @@ struct Combat {
     uint8_t audioEvents : 2;    // Одно-кадровые события для SFX
     uint8_t spawnTimer;         // Кадры до спавна волны; >0 — показывать индикаторы
     uint16_t stageTimer;        // Таймер стейджа в кадрах (60 сек)
-    uint8_t freezeFrames;
+    uint8_t tickPhase;
+    uint8_t timeWarpTicks;
+    uint8_t recursiveTicks;
+    uint8_t bitShiftTicks;
+    uint8_t puddleTicks;
+    uint8_t puddleX;
+    uint8_t puddleY;
+    uint8_t spiralShots;
+    uint8_t spiralDelay;
+    uint8_t visualEffect;
 };
 
 // Сброс: враги на стартовые позиции, пули очищены
@@ -45,8 +52,16 @@ void resetCombat(Combat& combat);
 
 // Таймеры -> пули -> автострельба. playerX/Y: левый верхний угол в 1/16 пикселя.
 // Новая пуля впервые двигается на следующем кадре, независимо от номера слота.
-void updateCombat(Combat& combat, int16_t playerX, int16_t playerY, uint8_t damage = SHOT_DAMAGE);
+void updateCombat(Combat& combat, int16_t playerX, int16_t playerY,
+                  uint8_t damageLevel = 0, uint8_t overclockLevel = 0,
+                  uint8_t fragmentationLevel = 0, uint8_t rangeLevel = 0);
 void damageEnemy(Combat& combat, uint8_t index, uint8_t damage);
+void damageEnemyFifths(Combat& combat, uint8_t index, uint8_t damage);
+
+int16_t projectileX(const Projectile& projectile);
+int16_t projectileY(const Projectile& projectile);
+int8_t projectileVelocityX(const Projectile& projectile);
+int8_t projectileVelocityY(const Projectile& projectile);
 
 // Спавн врагов текущей волны. playerX/Y: центр игрока (1/16 пикселя),
 // чтобы враги не появлялись прямо на нём.
@@ -66,6 +81,6 @@ uint8_t getEnemyScoreValue(EnemyType type, uint8_t variant);
 bool checkPlayerEnemyCollisions(const Combat& combat, int16_t playerX, int16_t playerY, bool touching = false);
 
 static_assert(sizeof(Enemy) == 6, "Enemy must be 6 bytes");
-static_assert(sizeof(ScoreOrb) == 6, "ScoreOrb must be 6 bytes");
+static_assert(sizeof(ScoreOrb) == 4, "ScoreOrb must be 4 bytes");
 
 } // пространство имён gc

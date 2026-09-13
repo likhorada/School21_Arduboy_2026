@@ -17,6 +17,9 @@ struct Obstacle {
 // x/y — внутри арены (0..ARENA_WIDTH-1 / 0..ARENA_HEIGHT-1).
 bool stageWallPixel(uint8_t stage, uint8_t x, uint8_t y);
 
+// Указатель на сжатую строку [run count, x, length, ...] во flash.
+const uint8_t* stageWallRow(uint8_t stage, uint8_t y);
+
 // Возвращаем координату в [0, extent); вход должен быть в [-extent, 2*extent).
 int16_t wrapCoordinate(int16_t coordinate, int16_t extent);
 

@@ -28,11 +28,12 @@ bool enemyHitsObstacle(uint8_t stage, int16_t centerX, int16_t centerY) {
 }
 
 // Простое движение к игроку с проверкой коллизий и скольжением вдоль стен
-void moveTowardsPlayer(uint8_t stage, Enemy& enemy, int16_t playerX, int16_t playerY, uint8_t speed) {
+void moveTowardsPlayer(uint8_t stage, Enemy& enemy, int16_t playerX,
+                       int16_t playerY, uint8_t speed, bool reversed) {
     const int16_t oldX = enemy.x;
     const int16_t oldY = enemy.y;
-    const int16_t dx = playerX - enemy.x;
-    const int16_t dy = playerY - enemy.y;
+    const int16_t dx = (playerX - enemy.x) * (reversed ? -1 : 1);
+    const int16_t dy = (playerY - enemy.y) * (reversed ? -1 : 1);
     
     if (dx == 0 && dy == 0) {
         return;
@@ -127,7 +128,7 @@ void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t vari
         // splitLevel хранит размер родителя: HP сам падает от выстрелов до 1,
         // а после смерти потомки наследуют splitLevel/2.
         setEnemyTypeAndHp(enemy, EnemyType::Splitter, variant);
-        enemy.splitLevel = variant;
+        setSplitLevel(enemy, variant);
         break;
         
     case EnemyType::Fast:
@@ -143,7 +144,8 @@ void spawnEnemy(Enemy& enemy, EnemyType type, int16_t x, int16_t y, uint8_t vari
 
 // Обновление всех врагов
 void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
-                   int16_t playerX, int16_t playerY, uint8_t stage) {
+                   int16_t playerX, int16_t playerY, uint8_t stage,
+                   bool slowed, bool reversed) {
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
         Enemy& enemy = enemies[i];
         const EnemyType type = getEnemyType(enemy);
@@ -177,7 +179,8 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
             break;
         }
         
-        moveTowardsPlayer(stage, enemy, playerX, playerY, speed);
+        if (slowed) speed = (speed + 1) / 2;
+        moveTowardsPlayer(stage, enemy, playerX, playerY, speed, reversed);
     }
     
     // Расталкивание врагов друг от друга
@@ -230,8 +233,8 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
 void createScoreOrb(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t x, int16_t y, uint8_t value) {
     for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
         if (orbs[i].lifetime == 0) {
-            orbs[i].x = x;
-            orbs[i].y = y;
+            orbs[i].x = wrapCoordinate(x, ARENA_WIDTH_FIXED) / FIXED_ONE;
+            orbs[i].y = wrapCoordinate(y, ARENA_HEIGHT_FIXED) / FIXED_ONE;
             orbs[i].value = value;
             orbs[i].lifetime = ORB_LIFETIME;
             return;
@@ -249,8 +252,10 @@ uint8_t collectOrbs(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t playerX, int16_t play
         }
         
         // Проверка касания с игроком (радиус сбора)
-        const int16_t dx = shortestDelta(playerX, orbs[i].x, ARENA_WIDTH_FIXED);
-        const int16_t dy = shortestDelta(playerY, orbs[i].y, ARENA_HEIGHT_FIXED);
+        const int16_t dx = shortestDelta(playerX, orbs[i].x * FIXED_ONE,
+                                         ARENA_WIDTH_FIXED);
+        const int16_t dy = shortestDelta(playerY, orbs[i].y * FIXED_ONE,
+                                         ARENA_HEIGHT_FIXED);
         const int32_t distSq = static_cast<int32_t>(dx) * dx + static_cast<int32_t>(dy) * dy;
         const int16_t collectRadius = 10 * FIXED_ONE;
         
@@ -261,6 +266,32 @@ uint8_t collectOrbs(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t playerX, int16_t play
     }
     
     return collected;
+}
+
+void pushEnemyAway(Enemy& enemy, int16_t playerX, int16_t playerY,
+                   uint8_t stage, uint8_t distance) {
+    int16_t dx = shortestDelta(playerX, enemy.x, ARENA_WIDTH_FIXED);
+    int16_t dy = shortestDelta(playerY, enemy.y, ARENA_HEIGHT_FIXED);
+    if (dx == 0 && dy == 0) dx = FIXED_ONE;
+    const int16_t magnitude = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
+                                  ? (dx < 0 ? -dx : dx)
+                                  : (dy < 0 ? -dy : dy);
+    const int8_t stepX = static_cast<int32_t>(dx) * FIXED_ONE / magnitude;
+    const int8_t stepY = static_cast<int32_t>(dy) * FIXED_ONE / magnitude;
+    for (uint8_t step = 0; step < distance; ++step) {
+        const int16_t nextX = enemy.x + stepX;
+        const int16_t nextY = enemy.y + stepY;
+        bool moved = false;
+        if (!enemyHitsObstacle(stage, nextX, enemy.y)) {
+            enemy.x = nextX;
+            moved = true;
+        }
+        if (!enemyHitsObstacle(stage, enemy.x, nextY)) {
+            enemy.y = nextY;
+            moved = true;
+        }
+        if (!moved) break;
+    }
 }
 
 } // namespace gc

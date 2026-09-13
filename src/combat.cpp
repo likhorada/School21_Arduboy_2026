@@ -13,30 +13,54 @@ namespace {
 
 constexpr int8_t NO_HIT = -1;
 constexpr int8_t WALL_HIT = -2;
+constexpr uint8_t PROJECTILE_DIRECTION_MASK = 0x1F;
+constexpr uint8_t PROJECTILE_DAMAGE_SHIFT = 5;
+enum ProjectileDamage : uint8_t { NormalDamage, HalfDamage, DoubleDamage };
 
-// Бинарным поиском находим целочисленную длину с округлением вверх, без float.
-// Минимум 1 защищает деление при совпадении центров игрока и цели.
-uint16_t aimLength(uint32_t distanceSquared) {
-  uint16_t low = 1;
-  uint16_t high = SHOT_RANGE_FIXED;
-  while (low < high) {
-    const uint16_t middle = (low + high) / 2;
-    if (static_cast<uint32_t>(middle) * middle < distanceSquared) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  return low;
+const int8_t projectileVelocityX2[] PROGMEM = {
+    4, 4, 4, 4, 3, 2, 1, 1, 0, -1, -1, -2, -3, -4, -4, -4,
+    -4, -4, -4, -4, -3, -2, -1, -1, 0, 1, 1, 2, 3, 4, 4, 4};
+const int8_t projectileVelocityY2[] PROGMEM = {
+    0, 1, 1, 2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2, 1, 1,
+    0, -1, -1, -2, -3, -4, -4, -4, -4, -4, -4, -4, -3, -2, -1, -1};
+
+int8_t directionVelocity(const int8_t* table, uint8_t direction) {
+  return static_cast<int8_t>(pgm_read_byte(&table[direction & 0x1F]));
 }
 
-// Считаем скорость пули по одной оси (нормализуем вектор без float).
-int8_t aimVelocity(int16_t delta, uint16_t length) {
-  const uint16_t magnitude = delta < 0 ? -delta : delta;
-  const uint8_t velocity =
-      (static_cast<uint32_t>(magnitude) * PROJECTILE_SPEED + length / 2) /
-      length;
-  return delta < 0 ? -velocity : velocity;
+uint8_t directionFor(int16_t dx, int16_t dy) {
+  const uint16_t ax = dx < 0 ? -dx : dx;
+  const uint16_t ay = dy < 0 ? -dy : dy;
+  const bool horizontal = ax >= ay;
+  const uint16_t major = horizontal ? ax : ay;
+  const uint16_t minor = horizontal ? ay : ax;
+  if (major == 0) return 0;
+  const uint8_t bend = minor * 16 < major ? 0
+                       : minor * 16 < major * 3 ? 1
+                       : minor * 8 < major * 3 ? 2
+                       : minor * 4 < major * 3 ? 3 : 4;
+  if (horizontal) {
+    if (dx >= 0) return dy >= 0 ? bend : (-bend & 0x1F);
+    return dy >= 0 ? 16 - bend : 16 + bend;
+  }
+  if (dy >= 0) return dx >= 0 ? 8 - bend : 8 + bend;
+  return dx >= 0 ? 24 + bend : 24 - bend;
+}
+
+bool createProjectile(Combat& combat, int16_t x, int16_t y, uint8_t direction,
+                      ProjectileDamage damage) {
+  for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
+    if (combat.projectiles[i].framesLeft == 0) {
+      Projectile& shot = combat.projectiles[i];
+      shot.x2 = wrapCoordinate(x, ARENA_WIDTH_FIXED) / (FIXED_ONE / 2);
+      shot.y2 = wrapCoordinate(y, ARENA_HEIGHT_FIXED) / (FIXED_ONE / 2);
+      shot.directionAndDamage =
+          (direction & PROJECTILE_DIRECTION_MASK) | (damage << PROJECTILE_DAMAGE_SHIFT);
+      shot.framesLeft = PROJECTILE_LIFETIME;
+      return true;
+    }
+  }
+  return false;
 }
 
 // Проверяем, попал ли отрезок (x,y)→(x+dx,y+dy) во что-то.
@@ -80,31 +104,50 @@ int8_t findHit(const Combat &combat, int16_t x, int16_t y, int16_t dx,
 // Двигаем активную пулю шагами не больше пикселя. Попадание освобождаёт её
 // слот.
 int8_t advanceProjectile(Projectile &projectile, const Combat &combat) {
-  int8_t previousX = 0;
-  int8_t previousY = 0;
-  for (uint8_t step = 1; step <= PROJECTILE_STEPS; ++step) {
-    const int8_t partialX =
-        static_cast<int16_t>(projectile.velocityX) * step / PROJECTILE_STEPS;
-    const int8_t partialY =
-        static_cast<int16_t>(projectile.velocityY) * step / PROJECTILE_STEPS;
-    const int8_t dx = partialX - previousX;
-    const int8_t dy = partialY - previousY;
-    previousX = partialX;
-    previousY = partialY;
-
-    const int8_t hit = findHit(combat, projectile.x, projectile.y, dx, dy);
-    if (hit != NO_HIT) {
-      projectile.framesLeft = 0;
-      return hit;
-    }
-    projectile.x = wrapCoordinate(projectile.x + dx, ARENA_WIDTH_FIXED);
-    projectile.y = wrapCoordinate(projectile.y + dy, ARENA_HEIGHT_FIXED);
+  const int16_t x = projectile.x2 * (FIXED_ONE / 2);
+  const int16_t y = projectile.y2 * (FIXED_ONE / 2);
+  const int16_t dx = projectileVelocityX(projectile);
+  const int16_t dy = projectileVelocityY(projectile);
+  const int8_t hit = findHit(combat, x, y, dx, dy);
+  if (hit != NO_HIT) {
+    projectile.framesLeft = 0;
+    return hit;
   }
+  projectile.x2 = wrapCoordinate(projectile.x2 + dx / (FIXED_ONE / 2),
+                                 ARENA_WIDTH * 2);
+  projectile.y2 = wrapCoordinate(projectile.y2 + dy / (FIXED_ONE / 2),
+                                 ARENA_HEIGHT * 2);
   --projectile.framesLeft;
   return NO_HIT;
 }
 
 } // namespace
+
+int16_t projectileX(const Projectile& projectile) {
+  return projectile.x2 * (FIXED_ONE / 2);
+}
+
+int16_t projectileY(const Projectile& projectile) {
+  return projectile.y2 * (FIXED_ONE / 2);
+}
+
+int8_t projectileVelocityX(const Projectile& projectile) {
+  const uint8_t direction = projectile.directionAndDamage & PROJECTILE_DIRECTION_MASK;
+  int8_t velocity = directionVelocity(projectileVelocityX2, direction);
+  if (((direction & 7) == 1 || (direction & 7) == 7) &&
+      !(projectile.framesLeft & 1) && (velocity == 1 || velocity == -1))
+    velocity = 0;
+  return velocity * (FIXED_ONE / 2);
+}
+
+int8_t projectileVelocityY(const Projectile& projectile) {
+  const uint8_t direction = projectile.directionAndDamage & PROJECTILE_DIRECTION_MASK;
+  int8_t velocity = directionVelocity(projectileVelocityY2, direction);
+  if (((direction & 7) == 1 || (direction & 7) == 7) &&
+      !(projectile.framesLeft & 1) && (velocity == 1 || velocity == -1))
+    velocity = 0;
+  return velocity * (FIXED_ONE / 2);
+}
 
 // Сброс боевой системы: очищаем всё, возвращаем врагов на стартовые позиции.
 void resetCombat(Combat &combat) {
@@ -142,7 +185,8 @@ bool checkPlayerEnemyCollisions(const Combat &combat, int16_t playerX,
 
 // Обновление боевой системы на текущий кадр.
 void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
-                  uint8_t damage) {
+                  uint8_t damageLevel, uint8_t overclockLevel,
+                  uint8_t fragmentationLevel, uint8_t rangeLevel) {
   if (combat.stageCleared)
     return;
   // Bonus clock includes spawn warnings; expiration never changes progression.
@@ -159,13 +203,9 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
   const int16_t originY =
       wrapCoordinate(playerY + PLAYER_SIZE * FIXED_ONE / 2, ARENA_HEIGHT_FIXED);
 
-  // Обновляем новую систему врагов
-  if (combat.freezeFrames > 0) {
-    --combat.freezeFrames;
-  } else {
-    updateEnemies(combat.enemies, combat.scoreOrbs, originX, originY,
-                  combat.currentStage);
-  }
+  updateEnemies(combat.enemies, combat.scoreOrbs, originX, originY,
+                combat.currentStage, combat.timeWarpTicks != 0,
+                combat.bitShiftTicks != 0);
 
   // Новые враги первый кадр остаются точно на индикаторах.
   if (combat.spawnTimer > 0 && --combat.spawnTimer == 0) {
@@ -181,8 +221,32 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
     }
     const int8_t hit = advanceProjectile(projectile, combat);
     if (hit >= 0) {
-      damageEnemy(combat, hit, damage);
+      const uint8_t baseDamage = 5 + damageLevel;
+      const uint8_t mode = projectile.directionAndDamage >> PROJECTILE_DAMAGE_SHIFT;
+      const uint8_t damage = mode == HalfDamage ? baseDamage / 2
+                             : mode == DoubleDamage ? baseDamage * 2
+                                                    : baseDamage;
+      damageEnemyFifths(combat, hit, damage);
     }
+  }
+
+  if (combat.tickPhase == 0 && combat.puddleTicks &&
+      combat.puddleTicks % MEMORY_DUMP_PULSE_TICKS == 0) {
+    uint8_t targets = 0;
+    const int16_t radius = MEMORY_DUMP_RADIUS * FIXED_ONE;
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+      const Enemy& enemy = combat.enemies[i];
+      const int16_t dx = shortestDelta(combat.puddleX * FIXED_ONE, enemy.x,
+                                       ARENA_WIDTH_FIXED);
+      const int16_t dy = shortestDelta(combat.puddleY * FIXED_ONE, enemy.y,
+                                       ARENA_HEIGHT_FIXED);
+      if (getEnemyType(enemy) != EnemyType::None &&
+          static_cast<int32_t>(dx) * dx + static_cast<int32_t>(dy) * dy <=
+              static_cast<int32_t>(radius) * radius)
+        targets |= uint8_t(1 << i);
+    }
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
+      if (targets & (1 << i)) damageEnemy(combat, i, 1);
   }
 
   // Собираем сферы очков
@@ -194,77 +258,68 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
   if (combat.stageCleared)
     return;
 
-  // Автострельба: кулдаун тратится только после успешного создания пули.
-  if (combat.shotCooldown != 0) {
-    return;
-  }
-  uint8_t freeSlot = MAX_PROJECTILES;
-  for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
-    if (combat.projectiles[i].framesLeft == 0) {
-      freeSlot = i;
-      break;
-    }
-  }
-  if (freeSlot == MAX_PROJECTILES) {
-    return; // Пул забит, пропускаем выстрел
-  }
-
-  const uint32_t rangeSquared =
-      static_cast<uint32_t>(SHOT_RANGE_FIXED) * SHOT_RANGE_FIXED;
-
-  // Ищем ближайшего врага (только новая система)
-  uint8_t bestTarget = 255;
-  uint32_t bestDistanceSquared = rangeSquared + 1;
-  int16_t bestDx = 0;
-  int16_t bestDy = 0;
-
-  // Проверяем новых врагов
-  for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
-    const Enemy &enemy = combat.enemies[i];
-    if (getEnemyType(enemy) == EnemyType::None) {
-      continue;
-    }
-
-    const int16_t targetX = wrapCoordinate(enemy.x, ARENA_WIDTH_FIXED);
-    const int16_t targetY = wrapCoordinate(enemy.y, ARENA_HEIGHT_FIXED);
-    const int16_t candidateX =
-        shortestDelta(originX, targetX, ARENA_WIDTH_FIXED);
-    const int16_t candidateY =
-        shortestDelta(originY, targetY, ARENA_HEIGHT_FIXED);
-    const uint32_t distanceSquared =
-        static_cast<int32_t>(candidateX) * candidateX +
-        static_cast<int32_t>(candidateY) * candidateY;
-    if (distanceSquared < bestDistanceSquared &&
-        !shotBlocked(combat.currentStage, originX, originY, candidateX,
-                     candidateY)) {
-      bestDistanceSquared = distanceSquared;
-      bestTarget = i;
-      bestDx = candidateX;
-      bestDy = candidateY;
+  if (combat.spiralShots) {
+    if (combat.spiralDelay) {
+      --combat.spiralDelay;
+    } else {
+      const uint8_t emitted = STACK_OVERFLOW_SHOTS - combat.spiralShots;
+      if (createProjectile(combat, originX, originY, (emitted * 3) & 0x1F,
+                           DoubleDamage)) {
+        --combat.spiralShots;
+        combat.spiralDelay = STACK_OVERFLOW_DELAY - 1;
+      }
     }
   }
 
-  if (bestTarget == 255) {
-    return; // Нет целей в радиусе
-  }
+  if (combat.shotCooldown != 0) return;
 
-  const uint16_t length = aimLength(bestDistanceSquared);
-  Projectile shot = {originX, originY, aimVelocity(bestDx, length),
-                     aimVelocity(bestDy, length), PROJECTILE_LIFETIME};
-  if (bestDx == 0 && bestDy == 0) {
-    shot.velocityX = PROJECTILE_SPEED; // Враг в точке спавна
+  const int16_t range = uint16_t(SHOT_RANGE_FIXED) * (10 + rangeLevel * 3) / 10;
+  const uint32_t rangeSquared = static_cast<uint32_t>(range) * range;
+  uint8_t usedTargets = 0;
+  bool fired = false;
+  for (uint8_t shotIndex = 0; shotIndex <= fragmentationLevel; ++shotIndex) {
+    uint8_t bestTarget = MAX_ENEMIES;
+    uint32_t bestDistanceSquared = rangeSquared + 1;
+    int16_t bestDx = 0, bestDy = 0;
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+      const Enemy& enemy = combat.enemies[i];
+      if ((usedTargets & (1 << i)) || getEnemyType(enemy) == EnemyType::None)
+        continue;
+      const int16_t dx = shortestDelta(originX, enemy.x, ARENA_WIDTH_FIXED);
+      const int16_t dy = shortestDelta(originY, enemy.y, ARENA_HEIGHT_FIXED);
+      const uint32_t distanceSquared = static_cast<int32_t>(dx) * dx +
+                                       static_cast<int32_t>(dy) * dy;
+      if (distanceSquared < bestDistanceSquared &&
+          !shotBlocked(combat.currentStage, originX, originY, dx, dy)) {
+        bestDistanceSquared = distanceSquared;
+        bestTarget = i;
+        bestDx = dx;
+        bestDy = dy;
+      }
+    }
+    if (bestTarget == MAX_ENEMIES) break;
+    usedTargets |= uint8_t(1 << bestTarget);
+    fired |= createProjectile(combat, originX, originY,
+                              directionFor(bestDx, bestDy), NormalDamage);
+    if (combat.recursiveTicks) {
+      const Enemy& target = combat.enemies[bestTarget];
+      const int16_t leftX = wrapCoordinate(originX - 8 * FIXED_ONE,
+                                            ARENA_WIDTH_FIXED);
+      const int16_t rightX = wrapCoordinate(originX + 8 * FIXED_ONE,
+                                             ARENA_WIDTH_FIXED);
+      createProjectile(combat, leftX, originY,
+                       directionFor(shortestDelta(leftX, target.x, ARENA_WIDTH_FIXED),
+                                    shortestDelta(originY, target.y, ARENA_HEIGHT_FIXED)),
+                       HalfDamage);
+      createProjectile(combat, rightX, originY,
+                       directionFor(shortestDelta(rightX, target.x, ARENA_WIDTH_FIXED),
+                                    shortestDelta(originY, target.y, ARENA_HEIGHT_FIXED)),
+                       HalfDamage);
+    }
   }
-
-  combat.projectiles[freeSlot] = shot;
-  // Очередь выстрелов: первый пуля захода ставит короткую паузу до следующей,
-  // последняя пуля очереди — полный SHOT_INTERVAL до следующего захода.
-  // burstShots считает уже выпущенные пули текущей очереди (0 = новый заход).
-  ++combat.burstShots;
-  if (combat.burstShots >= SHOT_BURST_COUNT) {
-    combat.burstShots = 0;
-    combat.shotCooldown = SHOT_INTERVAL;
-  } else {
-    combat.shotCooldown = SHOT_BURST_DELAY;
+  if (fired) {
+    const uint8_t rate = 3 + overclockLevel;
+    combat.shotCooldown = (SHOT_INTERVAL * 3 + rate - 1) / rate;
   }
 }
 
@@ -391,18 +446,22 @@ void checkWaveCompletion(Combat &combat) {
   }
 }
 
-void damageEnemy(Combat &combat, uint8_t index, uint8_t damage) {
+void damageEnemyFifths(Combat &combat, uint8_t index, uint8_t damage) {
   if (index >= MAX_ENEMIES || damage == 0)
     return;
   Enemy &enemy = combat.enemies[index];
   const EnemyType type = getEnemyType(enemy);
   if (type == EnemyType::None)
     return;
-  if (getEnemyHp(enemy) > damage) {
-    setEnemyHp(enemy, getEnemyHp(enemy) - damage);
+  const uint8_t total = getDamageRemainder(enemy) + damage;
+  const uint8_t wholeDamage = total / 5;
+  setDamageRemainder(enemy, total % 5);
+  if (wholeDamage == 0) return;
+  if (getEnemyHp(enemy) > wholeDamage) {
+    setEnemyHp(enemy, getEnemyHp(enemy) - wholeDamage);
     return;
   }
-  const uint8_t size = enemy.splitLevel;
+  const uint8_t size = getSplitLevel(enemy);
   const int16_t x = enemy.x, y = enemy.y;
   const uint8_t value = getEnemyScoreValue(type, size);
   combat.audioEvents |= AUDIO_EVENT_ENEMY_DEATH;
@@ -424,6 +483,10 @@ void damageEnemy(Combat &combat, uint8_t index, uint8_t damage) {
       }
     }
   }
+}
+
+void damageEnemy(Combat &combat, uint8_t index, uint8_t damage) {
+  damageEnemyFifths(combat, index, damage * 5);
 }
 
 // Получение стоимости врага в очках

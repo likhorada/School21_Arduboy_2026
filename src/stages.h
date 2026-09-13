@@ -22,10 +22,10 @@ namespace gc {
 // Описание одного врага в волне
 struct WaveEnemy {
   EnemyType type; // Тип врага
-  uint8_t hp; // HP (для Basic/Fast игнорируется, генерируется рандомно; для
-              // Splitter - начальный HP)
-  uint8_t x;  // Координата X в пикселях
-  uint8_t y;  // Координата Y в пикселях
+  uint8_t hp;     // HP (для Basic/Fast игнорируется, генерируется рандомно; для
+                  // Splitter - начальный HP)
+  uint8_t x;      // Координата X в пикселях
+  uint8_t y;      // Координата Y в пикселях
 };
 
 // Описание волны врагов
@@ -50,10 +50,10 @@ const WaveEnemy PROGMEM stage1_wave1[] = {{EnemyType::Basic, 3, 30, 20},
 // Волна 2: 2 базовых + 1 быстрый
 const WaveEnemy PROGMEM stage1_wave2[] = {{EnemyType::Basic, 3, 20, 15},
                                           {EnemyType::Basic, 3, 100, 15},
-                                          {EnemyType::Fast, 15, 60, 35}};
+                                          {EnemyType::Fast, 7, 60, 35}};
 
 // Волна 3: 1 Splitter
-const WaveEnemy PROGMEM stage1_wave3[] = {{EnemyType::Splitter, 16, 64, 28}};
+const WaveEnemy PROGMEM stage1_wave3[] = {{EnemyType::Splitter, 8, 64, 28}};
 
 // Массив волн для стейджа 1
 const Wave PROGMEM stage1_waves[] = {
@@ -66,18 +66,18 @@ const Stage PROGMEM stage1 = {3, // 3 волны
 // ====== СТЕЙДЖ 2 ======
 
 // Волна 1: три быстрых, разный разброс
-const WaveEnemy PROGMEM stage2_wave1[] = {{EnemyType::Fast, 15, 20, 12},
-                                          {EnemyType::Fast, 15, 108, 12},
-                                          {EnemyType::Splitter, 8, 64, 42}};
+const WaveEnemy PROGMEM stage2_wave1[] = {{EnemyType::Fast, 7, 20, 12},
+                                          {EnemyType::Fast, 8, 108, 12},
+                                          {EnemyType::Splitter, 6, 64, 42}};
 
 // Волна 2: два крупных сплиттера
-const WaveEnemy PROGMEM stage2_wave2[] = {{EnemyType::Splitter, 16, 40, 28},
-                                          {EnemyType::Splitter, 16, 96, 28}};
+const WaveEnemy PROGMEM stage2_wave2[] = {{EnemyType::Splitter, 7, 40, 28},
+                                          {EnemyType::Splitter, 7, 96, 28}};
 
 // Волна 3: финал стейджа — быстрые и сплиттеры
-const WaveEnemy PROGMEM stage2_wave3[] = {{EnemyType::Fast, 15, 24, 16},
-                                          {EnemyType::Fast, 15, 104, 16},
-                                          {EnemyType::Splitter, 16, 64, 40},
+const WaveEnemy PROGMEM stage2_wave3[] = {{EnemyType::Fast, 6, 24, 16},
+                                          {EnemyType::Fast, 7, 104, 16},
+                                          {EnemyType::Splitter, 6, 64, 40},
                                           {EnemyType::Basic, 3, 64, 50}};
 
 // Массив волн для стейджа 2
@@ -116,8 +116,7 @@ const Stage PROGMEM stage3 = {3, // 3 волны
                               stage3_waves};
 
 // Массив всех стейджей
-const Stage *const PROGMEM allStages[] = {
-    &stage1, &stage2, &stage3};
+const Stage *const PROGMEM allStages[] = {&stage1, &stage2, &stage3};
 
 constexpr uint8_t TOTAL_STAGES = 3;
 

@@ -87,6 +87,33 @@ void testFacingPacking() {
     }
 }
 
+void testPassivePackingAndMovement() {
+    PlayerPassives passives = {};
+    const PassiveId ids[] = {
+        PassiveId::CompilerOptimization, PassiveId::Overclock,
+        PassiveId::OptimizedBuild, PassiveId::MemoryFragmentation,
+        PassiveId::CollectionRange, PassiveId::RamCapacity
+    };
+    for (uint8_t selected = 0; selected < 6; ++selected) {
+        for (uint8_t level = 0; level < 4; ++level) {
+            setPassiveLevel(passives, ids[selected], level);
+            assert(passiveLevel(passives, ids[selected]) == level);
+            for (uint8_t other = 0; other < 6; ++other)
+                if (other != selected) assert(passiveLevel(passives, ids[other]) == 0);
+            setPassiveLevel(passives, ids[selected], 0);
+        }
+    }
+    assert(passiveLevel(passives, PassiveId::None) == 0);
+
+    for (uint8_t level = 0; level <= passiveCap(PassiveId::CompilerOptimization);
+         ++level) {
+        Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
+        setPassiveLevel(game.passives, PassiveId::CompilerOptimization, level);
+        updateGame(game, {1, 0, false, false, false, false});
+        assert(game.player.x == 60 * FIXED_ONE + WALK_SPEED * (5 + level) / 5);
+    }
+}
+
 void testIntroMenuAndReset() {
     Game game = {};
     assert(game.state == GameState::Intro);
@@ -394,7 +421,7 @@ void testDashMotion() {
                 assert(game.player.y == initial.y + tick * dy * speed);
                 assert(getFacingX(game.player) == dx && getFacingY(game.player) == dy);
                 assert(game.player.dashFrames == 6 - tick);
-                assert(game.player.slots[0].cooldown == DASH_COOLDOWN - tick + 1);
+                assert(game.player.slots[0].cooldown == DASH_COOLDOWN - tick / COOLDOWN_TICK_FRAMES);
                 assertSafe(game);
             }
             const int distanceSquared = (dx * dx + dy * dy) * speed * speed;
@@ -433,28 +460,29 @@ void testSlotsAndInputEdges() {
         Game game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
         game.player.slots[slot] = {AbilityId::Dash, 0};
         game.player.slots[other] = {AbilityId::None, 19};
-const InputFrame press = {1, 0, slot == 0, slot == 1, false, false};
-const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
+        const InputFrame press = {1, 0, slot == 0, slot == 1, false, false};
+        const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
         updateGame(game, press);
         assert(game.player.x == 60 * FIXED_ONE + DASH_SPEED);
         assert(game.player.slots[slot].cooldown == DASH_COOLDOWN);
-        assert(game.player.slots[other].cooldown == 18);
+        assert(game.player.slots[other].cooldown == 19);
         for (int tick = 2; tick <= 6; ++tick) {
             updateGame(game, idle);
         }
         const Player end = game.player;
-        // Нажимаем во время перезарядки, затем держим без новых нажатий.
+        // Нажатие во время перезарядки не запускает новый Dash.
         updateGame(game, pressIdle);
         assert(game.player.dashFrames == 0);
-        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 6);
-        for (unsigned frame = 0; frame < 3 * DASH_COOLDOWN; ++frame) {
+        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 1);
+        for (unsigned frame = 0; frame < COOLDOWN_TICK_FRAMES - 1; ++frame) {
             updateGame(game, idle);
             assert(game.player.x == end.x && game.player.y == end.y);
             assert(game.player.dashFrames == 0);
-            const int cooldown = DASH_COOLDOWN - 7 - static_cast<int>(frame);
-            assert(game.player.slots[slot].cooldown == (cooldown > 0 ? cooldown : 0));
-            assertSafe(game);
         }
+        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 2);
+        for (unsigned frame = 0;
+             frame < COOLDOWN_TICK_FRAMES * (DASH_COOLDOWN - 2); ++frame)
+            updateGame(game, idle);
         assert(game.player.slots[slot].cooldown == 0);
         assert(game.player.slots[other].cooldown == 0);
         updateGame(game, pressIdle);
@@ -472,7 +500,7 @@ const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
         updateGame(game, otherPress);
         assert(game.player.dashFrames == 4);
         assert(game.player.slots[other].cooldown == 0);
-        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 1);
+        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN);
         for (unsigned tick = 0; tick < 4; ++tick) {
             updateGame(game, idle);
         }
@@ -481,7 +509,7 @@ const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
         assert(game.player.x == beforeOther + DASH_SPEED);
         assert(game.player.dashFrames == 5);
         assert(game.player.slots[other].cooldown == DASH_COOLDOWN);
-        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 6);
+        assert(game.player.slots[slot].cooldown == DASH_COOLDOWN - 1);
 
         for (unsigned tick = 0; tick < 5; ++tick) {
             updateGame(game, idle);
@@ -490,7 +518,7 @@ const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
         game.player.slots[1].ability = AbilityId::None;
         const Player unequipped = game.player;
         const InputFrame both = {0, 0, true, true, false, false};
-        for (unsigned frame = 0; frame < 2 * DASH_COOLDOWN; ++frame) {
+        for (unsigned frame = 0; frame < COOLDOWN_TICK_FRAMES * DASH_COOLDOWN; ++frame) {
             updateGame(game, both);
             assert(game.player.x == unequipped.x && game.player.y == unequipped.y);
             assert(game.player.dashFrames == 0);
@@ -527,13 +555,25 @@ const InputFrame pressIdle = {0, 0, slot == 0, slot == 1, false, false};
             updateGame(game, idle);
         }
         const Player end = game.player;
-        for (unsigned frame = 0; frame < 2 * DASH_COOLDOWN; ++frame) {
+        for (unsigned frame = 0; frame < COOLDOWN_TICK_FRAMES * DASH_COOLDOWN; ++frame) {
             updateGame(game, idle);
             assert(game.player.x == end.x && game.player.y == end.y);
             assert(game.player.dashFrames == 0);
         }
         assert(game.player.slots[0].cooldown == 0 && game.player.slots[1].cooldown == 0);
     }
+
+    // Dash grants immunity for the full movement window, including enemy contact.
+    game = playingAt(60 * FIXED_ONE, 45 * FIXED_ONE);
+    updateGame(game, {1, 0, true, false, false, false});
+    const uint8_t hp = game.player.hp;
+    const int16_t centerX = game.player.x + PLAYER_SIZE * FIXED_ONE / 2;
+    const int16_t centerY = game.player.y + PLAYER_SIZE * FIXED_ONE / 2;
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, centerX, centerY, 0,
+               game.combat.currentStage);
+    updateGame(game, idle);
+    assert(game.player.hp == hp);
+    assert(game.player.iframes > 0);
 }
 
 void testMapConnectivity() {
@@ -724,10 +764,12 @@ void testKonamiCheat() {
         updateGame(game, idle);
     }
     assert(game.player.invincible == 1);
+    assert(game.combat.playerScore == KONAMI_BALANCE);
     // Бессмертие блокирует урон, не тратя HP.
     const uint8_t hp = game.player.hp;
+    const uint8_t iframes = game.player.iframes;
     damagePlayer(game.player);
-    assert(game.player.hp == hp && game.player.iframes == 0);
+    assert(game.player.hp == hp && game.player.iframes == iframes);
 
     // Ошибка в середине сбрасывает прогресс: после ←→←→ жмём ↓ вместо B.
     game = playingAt(5 * FIXED_ONE, 5 * FIXED_ONE);
@@ -745,6 +787,7 @@ void testKonamiCheat() {
     // Корректный полный код после сброса даёт бессмертие.
     for (const InputFrame& tap : taps) { updateGame(game, tap); updateGame(game, idle); }
     assert(game.player.invincible == 1);
+    assert(game.combat.playerScore == KONAMI_BALANCE);
 
     // Повторный код выключает бессмертие (тумблер для дебага).
     for (const InputFrame& tap : taps) {
@@ -791,6 +834,7 @@ void testStageTransitionRepositionsToSpawn() {
 
 int main() {
     testFacingPacking();
+    testPassivePackingAndMovement();
     testIntroMenuAndReset();
     testMainMenu();
     testWalking();

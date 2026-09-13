@@ -35,6 +35,7 @@ void updateKonami(Game& game, const InputFrame& input) {
             game.konamiProgress = 0;
         } else if (++game.konamiProgress == KONAMI_SEQUENCE_SIZE) {
             game.player.invincible = game.player.invincible ? 0 : 1;
+            game.combat.playerScore = KONAMI_BALANCE;
             game.konamiProgress = 0;
         }
         game.konamiTimer = 0;
@@ -68,6 +69,31 @@ void activateAbility(Game& game, ActiveSlot& slot) {
     case AbilityId::Dash:
         if (player.dashFrames) return;
         player.dashFrames = DASH_DURATION;
+        if (player.iframes < DASH_IFRAME_DURATION)
+            player.iframes = DASH_IFRAME_DURATION;
+        break;
+    case AbilityId::TimeWarp:
+        game.combat.timeWarpTicks = TIME_WARP_DURATION;
+        break;
+    case AbilityId::RecursiveCall:
+        game.combat.recursiveTicks = RECURSIVE_DURATION;
+        break;
+    case AbilityId::Free: {
+        uint8_t targets = 0;
+        for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
+            if (getEnemyType(game.combat.enemies[i]) != EnemyType::None)
+                targets |= uint8_t(1 << i);
+        for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+            if (!(targets & (1 << i))) continue;
+            const uint8_t damage = getEnemyType(game.combat.enemies[i]) == EnemyType::Basic
+                                       ? 31 : FREE_DAMAGE;
+            damageEnemy(game.combat, i, damage);
+        }
+        game.combat.visualEffect = 0x18;
+        break;
+    }
+    case AbilityId::BitShift:
+        game.combat.bitShiftTicks = BIT_SHIFT_DURATION;
         break;
     case AbilityId::MarkAndSweep: {
         uint8_t targets = 0;
@@ -84,23 +110,25 @@ void activateAbility(Game& game, ActiveSlot& slot) {
         }
         // Snapshot prevents newly split children being hit by the same activation.
         for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
-            if (targets & (1 << i)) damageEnemy(game.combat, i, SWEEP_DAMAGE);
+            if (targets & (1 << i)) {
+                pushEnemyAway(game.combat.enemies[i], px, py,
+                              game.combat.currentStage, SWEEP_PUSH);
+                damageEnemy(game.combat, i, SWEEP_DAMAGE);
+            }
         }
+        game.combat.visualEffect = 0x28;
         break;
     }
-    case AbilityId::StopTheWorld:
-        game.combat.freezeFrames = FREEZE_DURATION;
+    case AbilityId::StackOverflow:
+        game.combat.spiralShots = STACK_OVERFLOW_SHOTS;
+        game.combat.spiralDelay = 0;
         break;
-    case AbilityId::Compact:
-        for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
-            ScoreOrb& orb = game.combat.scoreOrbs[i];
-            if (orb.lifetime) {
-                game.combat.playerScore += orb.value;
-                game.combat.audioEvents |= AUDIO_EVENT_COIN;
-            }
-            orb.lifetime = 0;
-        }
-        if (player.iframes < COMPACT_SHIELD_DURATION) player.iframes = COMPACT_SHIELD_DURATION;
+    case AbilityId::MemoryDump:
+        game.combat.puddleX = wrapCoordinate(
+            player.x + PLAYER_SIZE * FIXED_ONE / 2, ARENA_WIDTH_FIXED) / FIXED_ONE;
+        game.combat.puddleY = wrapCoordinate(
+            player.y + PLAYER_SIZE * FIXED_ONE / 2, ARENA_HEIGHT_FIXED) / FIXED_ONE;
+        game.combat.puddleTicks = MEMORY_DUMP_DURATION;
         break;
     default: return;
     }
@@ -145,6 +173,49 @@ void movePlayer(Game& game, int8_t dx, int8_t dy, bool dashing) {
 
 } // namespace
 
+uint8_t passiveCap(PassiveId id) {
+    switch (id) {
+    case PassiveId::Overclock:
+    case PassiveId::MemoryFragmentation:
+        return 3;
+    case PassiveId::CompilerOptimization:
+    case PassiveId::OptimizedBuild:
+    case PassiveId::CollectionRange:
+    case PassiveId::RamCapacity:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
+uint16_t passivePrice(const Game& game, PassiveId id) {
+    const uint16_t base = id == PassiveId::RamCapacity
+                              ? RAM_CAPACITY_PRICE : PASSIVE_PRICE;
+    return base + uint32_t(base) * passiveLevel(game.passives, id) / 2;
+}
+
+uint16_t activePrice(AbilityId id) {
+    return id == AbilityId::TimeWarp || id == AbilityId::RecursiveCall
+               ? EXPENSIVE_ACTIVE_PRICE : ACTIVE_PRICE;
+}
+
+uint8_t shopChoice(const Game& game, ShopCategory category, uint8_t index) {
+    const uint8_t count = category == ShopCategory::Passive ? 6 : 7;
+    uint8_t state = game.shop.seed ^
+                    (category == ShopCategory::Passive ? 0x5B : 0xA7);
+    uint8_t used = 0;
+    uint8_t found = 0;
+    for (;;) {
+        state = state * 73 + 41;
+        const uint8_t candidate = state % count;
+        if (!(used & (1 << candidate))) {
+            if (found++ == index)
+                return candidate + (category == ShopCategory::Passive ? 1 : 2);
+            used |= uint8_t(1 << candidate);
+        }
+    }
+}
+
 void startGame(Game& game) {
     const uint8_t soundEnabled = game.soundEnabled;
     game = {};
@@ -159,14 +230,13 @@ void startGame(Game& game) {
 }
 
 void initShop(Game& game) {
+    const uint8_t seed = static_cast<uint8_t>(game.combat.playerScore) ^
+                         static_cast<uint8_t>(game.combat.playerScore >> 8) ^
+                         static_cast<uint8_t>(game.combat.stageTimer) ^
+                         static_cast<uint8_t>(game.combat.currentStage * 67);
     game.state = GameState::Shop;
     game.shop = {};
-    for (uint8_t i = 0; i < SHOP_PASSIVE_CHOICES; ++i) {
-        game.shop.passiveChoices[i] = i + 1;
-    }
-    for (uint8_t i = 0; i < SHOP_ACTIVE_CHOICES; ++i) {
-        game.shop.activeChoices[i] = i + 1;
-    }
+    game.shop.seed = seed;
 }
 
 void finishShop(Game& game) {
@@ -176,8 +246,12 @@ void finishShop(Game& game) {
     game.combat.waveCompleted = false;
     game.combat.stageTimer = STAGE_TIME_FRAMES;
     game.combat.spawnTimer = SPAWN_DELAY_FRAMES;
-    game.combat.freezeFrames = 0;
-    game.combat.burstShots = 0;
+    game.combat.timeWarpTicks = 0;
+    game.combat.recursiveTicks = 0;
+    game.combat.bitShiftTicks = 0;
+    game.combat.puddleTicks = 0;
+    game.combat.spiralShots = 0;
+    game.combat.visualEffect = 0;
     game.player.dashFrames = 0;
     // Позиция переносится с прошлого стейджа; на новом поле она может
     // оказаться в стене или у края карты — возвращаем её в стартовую точку.
@@ -202,26 +276,21 @@ void applyShopChoice(Game& game) {
     const uint8_t idx = game.shop.selectedIndex;
 if (game.shop.category == ShopCategory::Passive) {
         if (game.combat.playerScore < PASSIVE_PRICE) return;
-        switch (static_cast<PassiveId>(game.shop.passiveChoices[idx])) {
-        case PassiveId::DamageUp:
-            if (game.passives.damageLevel == 3) return;
-            ++game.passives.damageLevel;
-            break;
-        case PassiveId::MaxHpUp:
-            if (game.player.maxHp == PLAYER_MAX_HP_CAP) return;
-            ++game.passives.maxHpLevel;
+        const PassiveId choice = static_cast<PassiveId>(
+            shopChoice(game, ShopCategory::Passive, idx));
+        const uint8_t level = passiveLevel(game.passives, choice);
+        const uint16_t price = passivePrice(game, choice);
+        if (level >= passiveCap(choice) || game.combat.playerScore < price) return;
+        setPassiveLevel(game.passives, choice, level + 1);
+        if (choice == PassiveId::RamCapacity) {
             ++game.player.maxHp;
             ++game.player.hp;
-            break;
-        case PassiveId::MoveSpeedUp:
-            if (game.passives.moveSpeedLevel == 3) return;
-            ++game.passives.moveSpeedLevel;
-            break;
-        default: return;
         }
-        game.combat.playerScore -= PASSIVE_PRICE;
-        finishShopCategory(game);
-    } else if (game.combat.playerScore >= ACTIVE_PRICE) {
+        game.combat.playerScore -= price;
+    } else {
+        const AbilityId choice = static_cast<AbilityId>(
+            shopChoice(game, ShopCategory::Active, idx));
+        if (game.combat.playerScore < activePrice(choice)) return;
         game.shop.choosingSlot = true;
     }
 }
@@ -232,12 +301,11 @@ void updateShop(Game& game, const InputFrame& input) {
             game.shop.choosingSlot = false;
         } else if (input.activateA || input.activateB) {
             const uint8_t slot = input.activateA ? 0 : 1;
-            const ActiveUpgradeId choice = static_cast<ActiveUpgradeId>(
-                game.shop.activeChoices[game.shop.selectedIndex]);
-            game.player.slots[slot] = {abilityFromUpgrade(choice), 0};
-            game.combat.playerScore -= ACTIVE_PRICE;
+            const AbilityId choice = static_cast<AbilityId>(
+                shopChoice(game, ShopCategory::Active, game.shop.selectedIndex));
+            game.player.slots[slot] = {choice, 0};
+            game.combat.playerScore -= activePrice(choice);
             game.shop.choosingSlot = false;
-            finishShopCategory(game);
         }
     } else {
         if (input.moveX != game.shop.previousMoveX) {
@@ -342,9 +410,19 @@ void updateGame(Game& game, const InputFrame& input) {
     }
     Player& player = game.player;
     if (player.iframes) --player.iframes;
-    for (uint8_t i = 0; i < ACTIVE_SLOT_COUNT; ++i) {
-        if (player.slots[i].cooldown) --player.slots[i].cooldown;
+    if (++game.combat.tickPhase == COOLDOWN_TICK_FRAMES) {
+        game.combat.tickPhase = 0;
+        for (uint8_t i = 0; i < ACTIVE_SLOT_COUNT; ++i)
+            if (player.slots[i].cooldown) --player.slots[i].cooldown;
+        if (game.combat.timeWarpTicks) --game.combat.timeWarpTicks;
+        if (game.combat.recursiveTicks) --game.combat.recursiveTicks;
+        if (game.combat.bitShiftTicks) --game.combat.bitShiftTicks;
+        if (game.combat.puddleTicks) --game.combat.puddleTicks;
     }
+    if ((game.combat.visualEffect & 0x0F) == 1)
+        game.combat.visualEffect = 0;
+    else if ((game.combat.visualEffect & 0x0F) != 0)
+        --game.combat.visualEffect;
     if (checkPlayerEnemyCollisions(game.combat, player.x, player.y, true)) damagePlayer(player);
     if (!player.hp) { game.state = GameState::GameOver; return; }
     if (!player.dashFrames && (input.moveX || input.moveY)) setFacing(player, input.moveX, input.moveY);
@@ -359,12 +437,18 @@ void updateGame(Game& game, const InputFrame& input) {
     } else if (!dashing) {
         player.walkPhase = 0;
     }
-    uint8_t speed = dashing ? DASH_SPEED : WALK_SPEED + game.passives.moveSpeedLevel * 2;
+    const uint8_t speedLevel = passiveLevel(
+        game.passives, PassiveId::CompilerOptimization);
+    uint8_t speed = dashing ? DASH_SPEED : WALK_SPEED * (5 + speedLevel) / 5;
     if (dx && dy) speed = (uint16_t(speed) * 181 + 128) / 256;
     movePlayer(game, dx * speed, dy * speed, dashing);
     if (player.dashFrames) --player.dashFrames;
     if (!player.hp) { game.state = GameState::GameOver; return; }
-    updateCombat(game.combat, player.x, player.y, SHOT_DAMAGE + game.passives.damageLevel);
+    updateCombat(game.combat, player.x, player.y,
+                 passiveLevel(game.passives, PassiveId::OptimizedBuild),
+                 passiveLevel(game.passives, PassiveId::Overclock),
+                 passiveLevel(game.passives, PassiveId::MemoryFragmentation),
+                 passiveLevel(game.passives, PassiveId::CollectionRange));
     if (checkPlayerEnemyCollisions(game.combat, player.x, player.y, true)) damagePlayer(player);
     if (!player.hp) game.state = GameState::GameOver;
     else if (game.combat.stageCleared) {

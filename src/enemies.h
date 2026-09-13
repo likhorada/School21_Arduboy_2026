@@ -22,8 +22,8 @@ struct Enemy {
 
 // Дроп очков после смерти врага
 struct ScoreOrb {
-  int16_t x;
-  int16_t y;
+  uint8_t x;
+  uint8_t y;
   uint8_t value;    // Количество очков
   uint8_t lifetime; // Кадры до исчезновения
 };
@@ -45,6 +45,15 @@ inline void setEnemyHp(Enemy &e, uint8_t hp) {
 
 inline void setEnemyTypeAndHp(Enemy &e, EnemyType type, uint8_t hp) {
   e.typeAndHp = (static_cast<uint8_t>(type) & 0x07) | ((hp & 0x1F) << 3);
+}
+
+inline uint8_t getSplitLevel(const Enemy &e) { return e.splitLevel & 0x1F; }
+inline uint8_t getDamageRemainder(const Enemy &e) { return e.splitLevel >> 5; }
+inline void setSplitLevel(Enemy &e, uint8_t level) {
+  e.splitLevel = (e.splitLevel & 0xE0) | (level & 0x1F);
+}
+inline void setDamageRemainder(Enemy &e, uint8_t remainder) {
+  e.splitLevel = (e.splitLevel & 0x1F) | ((remainder & 0x07) << 5);
 }
 
 // Константы
@@ -89,7 +98,11 @@ bool enemyOverlapsPlayer(int16_t x, int16_t y, int16_t playerCenterX,
 bool enemyPositionValid(uint8_t stage, int16_t x, int16_t y);
 
 void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
-                   int16_t playerX, int16_t playerY, uint8_t stage);
+                    int16_t playerX, int16_t playerY, uint8_t stage,
+                    bool slowed = false, bool reversed = false);
+
+void pushEnemyAway(Enemy& enemy, int16_t playerX, int16_t playerY,
+                   uint8_t stage, uint8_t distance);
 
 void createScoreOrb(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t x, int16_t y,
                     uint8_t value);
@@ -98,6 +111,6 @@ uint8_t collectOrbs(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t playerX,
                     int16_t playerY);
 
 static_assert(sizeof(Enemy) == 6, "Enemy must be 6 bytes");
-static_assert(sizeof(ScoreOrb) == 6, "ScoreOrb must be 6 bytes");
+static_assert(sizeof(ScoreOrb) == 4, "ScoreOrb must be 4 bytes");
 
 } // namespace gc

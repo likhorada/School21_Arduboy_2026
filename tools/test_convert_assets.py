@@ -11,7 +11,8 @@ from PIL import Image
 from convert_assets import (NAMES, RECT_MIN_AREA, STAGE_H, STAGE_SOURCES,
                             STAGE_W, convert, convert_stage, decompose_stage,
                             lzss_decode_screens, lzss_encode, page_pack,
-                            parse_source, parse_stage_source, render_layout)
+                            parse_source, parse_stage_source, render_layout,
+                            row_run_pack)
 
 
 class ConversionTests(unittest.TestCase):
@@ -120,6 +121,24 @@ class StageConversionTests(unittest.TestCase):
             for x in range(STAGE_W):
                 self.assertEqual(bool((data[(y // 8) * STAGE_W + x] >> (y % 8)) & 1),
                                  mask[y * STAGE_W + x])
+
+    def test_row_runs_round_trip(self):
+        rng = random.Random(19)
+        mask = [bool(rng.randrange(5) == 0) for _ in range(STAGE_W * STAGE_H)]
+        data, blocks = row_run_pack(mask)
+        decoded = [False] * len(mask)
+        for y in range(STAGE_H):
+            pos = blocks[y // 8]
+            for _ in range(y & 7):
+                pos += 1 + data[pos] * 2
+            count = data[pos]
+            pos += 1
+            for _ in range(count):
+                start, length = data[pos:pos + 2]
+                pos += 2
+                for x in range(start, start + length):
+                    decoded[y * STAGE_W + x] = True
+        self.assertEqual(decoded, mask)
 
     def test_rejects_overwide_source(self):
         for name, size in (("wrong size", (STAGE_W + 1, STAGE_H)),

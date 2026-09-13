@@ -28,6 +28,27 @@ Game fixture() {
     return game;
 }
 
+void selectChoice(Game& game, ShopCategory category, uint8_t choice) {
+    game.shop.category = category;
+    for (unsigned seed = 0; seed < 256; ++seed) {
+        game.shop.seed = static_cast<uint8_t>(seed);
+        for (uint8_t index = 0; index < 3; ++index) {
+            if (shopChoice(game, category, index) == choice) {
+                game.shop.selectedIndex = index;
+                return;
+            }
+        }
+    }
+    assert(false);
+}
+
+unsigned projectiles(const Combat& combat) {
+    unsigned count = 0;
+    for (const Projectile& projectile : combat.projectiles)
+        count += projectile.framesLeft != 0;
+    return count;
+}
+
 void assertSeparated(const Game& game) {
     assert(!checkPlayerEnemyCollisions(game.combat, game.player.x, game.player.y));
     for (const Enemy& e : game.combat.enemies) {
@@ -168,36 +189,100 @@ void testShop() {
     updateGame(game, pressA);
     assert(game.shop.category == ShopCategory::Passive && game.combat.playerScore == 0);
 
-    game.combat.playerScore = 1000;
-    updateGame(game, pressA);
-    assert(game.state == GameState::Shop && game.shop.category == ShopCategory::Active);
-    assert(game.passives.damageLevel == 1 && game.combat.playerScore == 900);
+    const PassiveId passiveIds[] = {
+        PassiveId::CompilerOptimization, PassiveId::Overclock,
+        PassiveId::OptimizedBuild, PassiveId::MemoryFragmentation,
+        PassiveId::CollectionRange, PassiveId::RamCapacity
+    };
+    const uint8_t caps[] = {2, 3, 2, 3, 2, 2};
+    for (uint8_t i = 0; i < 6; ++i) {
+        assert(passiveCap(passiveIds[i]) == caps[i]);
+        Game priced = fixture();
+        const uint16_t base = passiveIds[i] == PassiveId::RamCapacity
+                                  ? RAM_CAPACITY_PRICE : PASSIVE_PRICE;
+        for (uint8_t level = 0; level <= caps[i]; ++level) {
+            setPassiveLevel(priced.passives, passiveIds[i], level);
+            assert(passivePrice(priced, passiveIds[i]) ==
+                   base + static_cast<uint32_t>(base) * level / 2);
+        }
+        initShop(priced);
+        selectChoice(priced, ShopCategory::Passive,
+                     static_cast<uint8_t>(passiveIds[i]));
+        priced.combat.playerScore = 65535;
+        applyShopChoice(priced);
+        assert(passiveLevel(priced.passives, passiveIds[i]) == caps[i]);
+        assert(priced.combat.playerScore == 65535);
+    }
+    assert(passiveCap(PassiveId::None) == 0);
+    for (uint8_t id = static_cast<uint8_t>(AbilityId::TimeWarp);
+         id <= static_cast<uint8_t>(AbilityId::MemoryDump); ++id) {
+        const AbilityId ability = static_cast<AbilityId>(id);
+        const uint16_t expected = ability == AbilityId::TimeWarp ||
+                                          ability == AbilityId::RecursiveCall
+                                      ? EXPENSIVE_ACTIVE_PRICE : ACTIVE_PRICE;
+        assert(activePrice(ability) == expected);
+        assert(abilityCooldown(ability) > 0);
+    }
 
+    // Every seed produces three deterministic, in-range, unique cards.
+    for (unsigned seed = 0; seed < 256; ++seed) {
+        game.shop.seed = static_cast<uint8_t>(seed);
+        for (uint8_t category = 0; category < 2; ++category) {
+            const ShopCategory kind = static_cast<ShopCategory>(category);
+            const uint8_t a = shopChoice(game, kind, 0);
+            const uint8_t b = shopChoice(game, kind, 1);
+            const uint8_t c = shopChoice(game, kind, 2);
+            assert(a != b && a != c && b != c);
+            assert(a >= (category ? 2 : 1) && a <= (category ? 8 : 6));
+            assert(a == shopChoice(game, kind, 0));
+        }
+    }
+
+    // Purchases do not advance the category and the next level costs 50% more.
+    game = fixture();
+    initShop(game);
+    selectChoice(game, ShopCategory::Passive,
+                 static_cast<uint8_t>(PassiveId::CompilerOptimization));
+    game.combat.playerScore = 2000;
     updateGame(game, pressA);
-    assert(game.shop.choosingSlot && game.combat.playerScore == 900);
+    assert(passiveLevel(game.passives, PassiveId::CompilerOptimization) == 1);
+    assert(game.combat.playerScore == 1500 && game.shop.category == ShopCategory::Passive);
+    updateGame(game, pressA);
+    assert(passiveLevel(game.passives, PassiveId::CompilerOptimization) == 2);
+    assert(game.combat.playerScore == 750 && game.shop.category == ShopCategory::Passive);
+    updateGame(game, pressA);
+    assert(passiveLevel(game.passives, PassiveId::CompilerOptimization) == 2);
+    assert(game.combat.playerScore == 750);
+
+    game = fixture();
+    initShop(game);
+    selectChoice(game, ShopCategory::Passive,
+                 static_cast<uint8_t>(PassiveId::RamCapacity));
+    game.combat.playerScore = 2500;
+    updateGame(game, pressA);
+    updateGame(game, pressA);
+    assert(passiveLevel(game.passives, PassiveId::RamCapacity) == 2);
+    assert(game.player.hp == 6 && game.player.maxHp == 6);
+    assert(game.combat.playerScore == 0);
+
+    // The same active offer may be bought into both slots.
+    game = fixture();
+    initShop(game);
+    selectChoice(game, ShopCategory::Active,
+                 static_cast<uint8_t>(AbilityId::TimeWarp));
+    game.combat.playerScore = 4000;
+    updateGame(game, pressA);
+    assert(game.shop.choosingSlot);
     updateGame(game, {-1, 0, false, false, false, false});
-    assert(!game.shop.choosingSlot && game.combat.playerScore == 900);
+    assert(!game.shop.choosingSlot && game.combat.playerScore == 4000);
+    updateGame(game, pressA);
+    updateGame(game, pressA);
     updateGame(game, pressA);
     updateGame(game, pressB);
-    assert(game.player.slots[0].ability == AbilityId::Dash);
-    assert(game.player.slots[1].ability == AbilityId::MarkAndSweep);
-    assert(game.state == GameState::Playing && game.combat.playerScore == 700);
-
-    initShop(game);
-    updateGame(game, pressB);
-    assert(game.shop.category == ShopCategory::Active);
-    game.shop.selectedIndex = 1;
-    updateGame(game, pressA);
-    updateGame(game, pressA);
-    assert(game.player.slots[0].ability == AbilityId::StopTheWorld);
-    assert(game.player.slots[1].ability == AbilityId::MarkAndSweep);
-    assert(game.state == GameState::Playing && game.combat.playerScore == 500);
-
-    initShop(game);
-    game.shop.selectedIndex = 2;
-    updateGame(game, pressA);
-    assert(game.passives.moveSpeedLevel == 1 && game.combat.playerScore == 400);
-    assert(game.shop.category == ShopCategory::Active);
+    assert(game.player.slots[0].ability == AbilityId::TimeWarp);
+    assert(game.player.slots[1].ability == AbilityId::TimeWarp);
+    assert(game.combat.playerScore == 1000);
+    assert(game.state == GameState::Shop && game.shop.category == ShopCategory::Active);
     updateGame(game, pressB);
     assert(game.state == GameState::Playing);
 
@@ -222,15 +307,6 @@ void testShop() {
     updateGame(game, pressA);
     assert(game.state == GameState::Shop && !game.shop.choosingSlot);
 
-    for (unsigned i = 0; i < 3; ++i) {
-        initShop(game);
-        game.combat.playerScore = 1000;
-        game.shop.selectedIndex = 1;
-        updateGame(game, pressA);
-        assert(game.player.maxHp == (i == 0 ? 5 : 6));
-        assert(game.combat.playerScore == (i < 2 ? 900 : 1000));
-        assert(game.shop.category == (i < 2 ? ShopCategory::Active : ShopCategory::Passive));
-    }
     for (uint8_t hp = 0; hp <= 6; ++hp) {
         for (uint8_t i = 0; i < 4; ++i)
             assert(heartState(hp, i) == (hp > i + 4 ? 2 : (hp > i ? 1 : 0)));
@@ -274,7 +350,6 @@ void testContactAndSpawns() {
                        axis == 0 ? (direction > 0 ? ENEMY_HALF_WIDTH * 16 : (ARENA_WIDTH - ENEMY_HALF_WIDTH) * 16) : cx,
                        axis == 1 ? (direction > 0 ? ENEMY_HALF_HEIGHT * 16 : (ARENA_HEIGHT - ENEMY_HALF_HEIGHT) * 16) : cy, 3,
                        game.combat.currentStage);
-            game.combat.freezeFrames = 200;
             for (unsigned i = 0; i < 15; ++i) {
                 updateGame(game, {int8_t(axis == 0 ? direction : 0), int8_t(axis == 1 ? direction : 0), i == 0, false, false, false});
                 assertSeparated(game);
@@ -403,53 +478,117 @@ void testEnemyBoundariesAndSpeed() {
 
 void testAbilitiesAndCombat() {
     Game game = fixture();
-    const int16_t x = game.player.x, y = game.player.y;
-    game.player.slots[0] = {AbilityId::MarkAndSweep, 0};
-    game.player.slots[1] = {AbilityId::StopTheWorld, 0};
-    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, x + 20 * 16, y, 8,
-                   game.combat.currentStage);
-    spawnEnemy(game.combat.enemies[1], EnemyType::Basic, x - 35 * 16, y, 8,
-                   game.combat.currentStage);
-    updateGame(game, pressA);
-    assert(getEnemyHp(game.combat.enemies[0]) == 6);
-    assert(getEnemyHp(game.combat.enemies[1]) == 10);
-    assert(game.player.x == x && game.player.y == y && game.player.dashFrames == 0);
-    assert(game.player.slots[0].cooldown == 180);
-    updateGame(game, pressB);
-    const Enemy frozen = game.combat.enemies[1];
-    assert(game.combat.freezeFrames == FREEZE_DURATION - 1);
-    for (unsigned i = 1; i < FREEZE_DURATION; ++i) {
-        game.combat.shotCooldown = 2;
-        for (Projectile& p : game.combat.projectiles) p.framesLeft = 0;
-        updateGame(game, idle);
-        assert(game.combat.enemies[1].x == frozen.x && game.combat.enemies[1].y == frozen.y);
-    }
-    updateGame(game, idle);
-    assert(game.combat.enemies[1].x != frozen.x || game.combat.enemies[1].y != frozen.y);
-    game = fixture();
-    game.player.slots[1] = {AbilityId::Compact, 0};
-    createScoreOrb(game.combat.scoreOrbs, 0, 0, 15);
-    updateGame(game, pressB);
-    assert(game.combat.playerScore == 15 && game.player.iframes == COMPACT_SHIELD_DURATION);
-    assert(game.combat.audioEvents & AUDIO_EVENT_COIN);
-    assert(game.player.slots[1].cooldown == 200);
-    assert(game.player.dashFrames == 0);
+    const int16_t centerX = game.player.x + HALF_PLAYER;
+    const int16_t centerY = game.player.y + HALF_PLAYER;
 
+    // Sweep damages only nearby enemies and pushes them away from the player.
+    game.player.slots[0] = {AbilityId::MarkAndSweep, 0};
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, centerX + 20 * 16,
+               centerY, 8, game.combat.currentStage);
+    spawnEnemy(game.combat.enemies[1], EnemyType::Basic, centerX - 35 * 16,
+               centerY, 8, game.combat.currentStage);
+    const int16_t nearX = game.combat.enemies[0].x;
+    updateGame(game, pressA);
+    assert(getEnemyHp(game.combat.enemies[0]) == 8);
+    assert(getEnemyHp(game.combat.enemies[1]) == 10);
+    assert(game.combat.enemies[0].x > nearX);
+    assert(game.player.slots[0].cooldown == SWEEP_COOLDOWN);
+    // Wrapped neighbours are pushed away along the same shortest path used by
+    // the radius test, not toward the player through the opposite edge.
     game = fixture();
-    game.passives.moveSpeedLevel = 3;
-    updateGame(game, {1, 0, false, false, false, false});
-    assert(game.player.x == x + WALK_SPEED + 6);
-    // Damage upgrade affects real moving projectiles, including their last live frame.
-    for (uint8_t level = 0; level < 4; ++level) {
-        game = fixture();
-        game.passives.damageLevel = level;
-        game.combat.freezeFrames = 10;
-        spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 75 * 16, 50 * 16, 8,
-                   game.combat.currentStage);
-        game.combat.projectiles[0] = {68 * 16, 50 * 16, PROJECTILE_SPEED, 0, 1};
-        updateGame(game, idle);
-        assert(getEnemyHp(game.combat.enemies[0]) == 9 - level);
+    game.player.x = 0;
+    game.player.y = 0;
+    game.player.slots[0] = {AbilityId::MarkAndSweep, 0};
+    spawnEnemy(game.combat.enemies[0], EnemyType::Fast, 96 * FIXED_ONE,
+               HALF_PLAYER, 0, 0);
+    spawnEnemy(game.combat.enemies[1], EnemyType::Fast, 8 * FIXED_ONE,
+               60 * FIXED_ONE, 0, 0);
+    const int16_t wrappedX = game.combat.enemies[0].x;
+    const int16_t wrappedY = game.combat.enemies[1].y;
+    updateGame(game, pressA);
+    assert(game.combat.enemies[0].x < wrappedX);
+    assert(game.combat.enemies[1].y < wrappedY);
+    // Time Warp halves enemy movement; Bit Shift reverses it.
+    game = fixture();
+    game.player.slots[0] = {AbilityId::TimeWarp, 0};
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, centerX + 20 * 16,
+               centerY, 0, game.combat.currentStage);
+    const int16_t startX = game.combat.enemies[0].x;
+    updateGame(game, pressA);
+    assert(startX - game.combat.enemies[0].x == (BASIC_SPEED + 1) / 2);
+    assert(game.combat.timeWarpTicks == TIME_WARP_DURATION);
+    assert(game.player.slots[0].cooldown == TIME_WARP_COOLDOWN);
+    game = fixture();
+    game.player.slots[0] = {AbilityId::BitShift, 0};
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, centerX + 20 * 16,
+               centerY, 0, game.combat.currentStage);
+    const int16_t reversedX = game.combat.enemies[0].x;
+    updateGame(game, pressA);
+    assert(game.combat.enemies[0].x > reversedX);
+    assert(game.combat.bitShiftTicks == BIT_SHIFT_DURATION);
+    // Free deletes basics and deals six damage to tougher enemies.
+    game = fixture();
+    game.player.slots[0] = {AbilityId::Free, 0};
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 75 * 16, 50 * 16, 8,
+               game.combat.currentStage);
+    spawnEnemy(game.combat.enemies[1], EnemyType::Fast, 85 * 16, 50 * 16, 0,
+               game.combat.currentStage);
+    setEnemyHp(game.combat.enemies[1], FAST_MAX_HP);
+    updateGame(game, pressA);
+    assert(getEnemyType(game.combat.enemies[0]) == EnemyType::None);
+    assert(getEnemyHp(game.combat.enemies[1]) == FAST_MAX_HP - FREE_DAMAGE);
+    assert(game.player.slots[0].cooldown == FREE_COOLDOWN);
+    // Recursive Call adds two half-damage side shots for each normal target.
+    game = fixture();
+    game.player.slots[0] = {AbilityId::RecursiveCall, 0};
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, centerX + 25 * 16,
+               centerY, 8, game.combat.currentStage);
+    updateGame(game, pressA);
+    assert(game.combat.recursiveTicks == RECURSIVE_DURATION);
+    assert(projectiles(game.combat) == 3);
+    for (const Projectile& projectile : game.combat.projectiles) {
+        if (!projectile.framesLeft) continue;
+        assert(projectileX(projectile) >= 0 && projectileX(projectile) < ARENA_WIDTH_FIXED);
+        assert(projectileY(projectile) >= 0 && projectileY(projectile) < ARENA_HEIGHT_FIXED);
+        assert(projectileVelocityX(projectile) || projectileVelocityY(projectile));
     }
+    // Stack Overflow emits twelve double-damage spiral shots at fixed intervals.
+    game = fixture();
+    game.player.slots[0] = {AbilityId::StackOverflow, 0};
+    game.combat.shotCooldown = 255;
+    updateGame(game, pressA);
+    assert(game.combat.spiralShots == STACK_OVERFLOW_SHOTS - 1);
+    assert(projectiles(game.combat) == 1);
+    for (unsigned frame = 0; frame < (STACK_OVERFLOW_SHOTS - 1) * STACK_OVERFLOW_DELAY;
+         ++frame)
+        updateGame(game, idle);
+    assert(game.combat.spiralShots == 0 && projectiles(game.combat) == STACK_OVERFLOW_SHOTS);
+    // Memory Dump snapshots pixel coordinates and pulses damage in its radius.
+    game = fixture();
+    game.player.slots[0] = {AbilityId::MemoryDump, 0};
+    game.combat.shotCooldown = 255;
+    spawnEnemy(game.combat.enemies[0], EnemyType::Fast, centerX, centerY, 0,
+               game.combat.currentStage);
+    setEnemyHp(game.combat.enemies[0], FAST_MAX_HP);
+    updateGame(game, pressA);
+    assert(game.combat.puddleX == centerX / FIXED_ONE);
+    assert(game.combat.puddleY == centerY / FIXED_ONE);
+    assert(game.combat.puddleTicks == MEMORY_DUMP_DURATION);
+    for (unsigned frame = 0; frame < 7 * COOLDOWN_TICK_FRAMES; ++frame)
+        updateGame(game, idle);
+    assert(getEnemyHp(game.combat.enemies[0]) == FAST_MAX_HP - 1);
+    // Fifths accumulate exactly, preserving fractional projectile damage.
+    game = fixture();
+    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 75 * 16, 50 * 16, 8,
+               game.combat.currentStage);
+    const uint8_t hp = getEnemyHp(game.combat.enemies[0]);
+    damageEnemyFifths(game.combat, 0, 2);
+    assert(getEnemyHp(game.combat.enemies[0]) == hp &&
+           getDamageRemainder(game.combat.enemies[0]) == 2);
+    damageEnemyFifths(game.combat, 0, 3);
+    assert(getEnemyHp(game.combat.enemies[0]) == hp - 1 &&
+           getDamageRemainder(game.combat.enemies[0]) == 0);
+
     game = fixture();
     spawnEnemy(game.combat.enemies[0], EnemyType::Splitter, 75 * 16, 50 * 16, 16,
                game.combat.currentStage);
@@ -464,13 +603,7 @@ void testAbilitiesAndCombat() {
     damageEnemy(game.combat, 0, 31);
     assert(alive(game.combat) == MAX_ENEMIES && game.combat.playerScore == 16);
     damageEnemy(game.combat, MAX_ENEMIES, 31); // Invalid index is harmless.
-    // Pool exhaustion keeps existing projectiles and retries on later frames.
-    for (Projectile& p : game.combat.projectiles) p = {48 * 16, 0, 0, 0, 10};
-    updateCombat(game.combat, game.player.x, game.player.y);
-    for (const Projectile& p : game.combat.projectiles) assert(p.framesLeft == 9);
-
     game = fixture();
-    game.combat.freezeFrames = 10;
     game.combat.currentStage = 1;
     spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 75 * 16, 50 * 16, 3,
                game.combat.currentStage);
@@ -479,36 +612,82 @@ void testAbilitiesAndCombat() {
     assert(!shotBlocked(1, 60 * 16, 50 * 16, (75 - 60) * 16, 0));
     updateCombat(game.combat, 60 * 16 - HALF_PLAYER, 50 * 16 - HALF_PLAYER);
     assert(game.combat.projectiles[0].framesLeft == PROJECTILE_LIFETIME);
-    assert(game.combat.projectiles[0].velocityX > 0); // Видимая цель, не стена.
-    game = fixture();
-    game.combat.freezeFrames = 10;
-    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 6 * 16, 50 * 16, 8,
-               game.combat.currentStage);
-    game.combat.projectiles[0] = {(ARENA_WIDTH - 1) * 16, 50 * 16, PROJECTILE_SPEED, 0, 2};
-    updateCombat(game.combat, game.player.x, game.player.y);
-    assert(getEnemyHp(game.combat.enemies[0]) == 9);
+    assert(projectileVelocityX(game.combat.projectiles[0]) > 0);
     createScoreOrb(game.combat.scoreOrbs, 0, 0, 5);
     assert(collectOrbs(game.combat.scoreOrbs, ARENA_WIDTH_FIXED - 16, ARENA_HEIGHT_FIXED - 16) == 5);
 }
 
-// Очередь выстрелов: две пули подряд, потом полный перезаряд.
-void testBurstFire() {
-    Game game = fixture();
-    game.combat.freezeFrames = 0;
-    spawnEnemy(game.combat.enemies[0], EnemyType::Basic, 68 * 16, 48 * 16, 8,
-               game.combat.currentStage);
-    // Первая пуля захода: короткая пауза до следующей.
-    updateCombat(game.combat, game.player.x, game.player.y);
-    assert(game.combat.projectiles[0].framesLeft == PROJECTILE_LIFETIME);
-    assert(game.combat.burstShots == 1);
-    assert(game.combat.shotCooldown == SHOT_BURST_DELAY);
-    // Вторая пуля завершает заход и ставит полный SHOT_INTERVAL.
-    for (uint8_t i = 1; i < SHOT_BURST_DELAY; ++i)
-        updateCombat(game.combat, game.player.x, game.player.y);
-    updateCombat(game.combat, game.player.x, game.player.y);
-    assert(game.combat.projectiles[1].framesLeft == PROJECTILE_LIFETIME);
-    assert(game.combat.burstShots == 0);
-    assert(game.combat.shotCooldown == SHOT_INTERVAL);
+void testPassiveFireUpgrades() {
+    // Optimized Build adds fifths of damage without discarding the remainder.
+    for (uint8_t level = 0; level <= 2; ++level) {
+        Combat combat = {};
+        combat.waveCompleted = true;
+        spawnEnemy(combat.enemies[0], EnemyType::Basic, 75 * FIXED_ONE,
+                   50 * FIXED_ONE, 8, 0);
+        combat.projectiles[0] = {68 * 2, 50 * 2, 0, 1};
+        updateCombat(combat, 20 * FIXED_ONE, 20 * FIXED_ONE, level);
+        assert(getEnemyHp(combat.enemies[0]) == 9);
+        assert(getDamageRemainder(combat.enemies[0]) == level);
+    }
+
+    // Fragmentation chooses distinct targets, up to one plus its level.
+    for (uint8_t targets = 1; targets <= 4; ++targets) {
+        Combat combat = {};
+        combat.waveCompleted = true;
+        for (uint8_t i = 0; i < targets; ++i)
+            spawnEnemy(combat.enemies[i], EnemyType::Basic,
+                       (44 + i * 8) * FIXED_ONE, 30 * FIXED_ONE, i, 0);
+        updateCombat(combat, 20 * FIXED_ONE - HALF_PLAYER,
+                     30 * FIXED_ONE - HALF_PLAYER, 0, 0, targets - 1, 0);
+        assert(projectiles(combat) == targets);
+    }
+
+    // Overclock scales the interval; range level one reaches a target outside base range.
+    for (uint8_t level = 0; level <= 3; ++level) {
+        Combat combat = {};
+        combat.waveCompleted = true;
+        combat.timeWarpTicks = 1;
+        spawnEnemy(combat.enemies[0], EnemyType::Basic, 64 * FIXED_ONE,
+                   48 * FIXED_ONE, 0, 0);
+        updateCombat(combat, 20 * FIXED_ONE - HALF_PLAYER,
+                     20 * FIXED_ONE - HALF_PLAYER, 0, level, 0, 1);
+        assert(projectiles(combat) == 1);
+        const uint8_t rate = 3 + level;
+        assert(combat.shotCooldown == (SHOT_INTERVAL * 3 + rate - 1) / rate);
+    }
+    Combat combat = {};
+    combat.waveCompleted = true;
+    combat.timeWarpTicks = 1;
+    spawnEnemy(combat.enemies[0], EnemyType::Basic, 64 * FIXED_ONE,
+               48 * FIXED_ONE, 0, 0);
+    updateCombat(combat, 20 * FIXED_ONE - HALF_PLAYER,
+                 20 * FIXED_ONE - HALF_PLAYER, 0, 0, 0, 0);
+    assert(projectiles(combat) == 0);
+
+    // Quantized auto-aim still reaches shallow, diagonal and wrapped targets.
+    const int16_t player[][2] = {{20, 20}, {20, 20}, {0, 28}};
+    const int16_t target[][2] = {{60, 25}, {50, 50}, {96, 31}};
+    for (uint8_t scenario = 0; scenario < 3; ++scenario) {
+        Combat aimed = {};
+        aimed.waveCompleted = true;
+        spawnEnemy(aimed.enemies[0], EnemyType::Basic,
+                   target[scenario][0] * FIXED_ONE,
+                   target[scenario][1] * FIXED_ONE, 8, 0);
+        const uint8_t initialHp = getEnemyHp(aimed.enemies[0]);
+        updateCombat(aimed, player[scenario][0] * FIXED_ONE - HALF_PLAYER,
+                     player[scenario][1] * FIXED_ONE - HALF_PLAYER);
+        aimed.shotCooldown = 255;
+        for (uint8_t frame = 0; frame < PROJECTILE_LIFETIME &&
+                                getEnemyHp(aimed.enemies[0]) == initialHp;
+             ++frame) {
+            aimed.enemies[0].x = target[scenario][0] * FIXED_ONE;
+            aimed.enemies[0].y = target[scenario][1] * FIXED_ONE;
+            updateCombat(aimed,
+                         player[scenario][0] * FIXED_ONE - HALF_PLAYER,
+                         player[scenario][1] * FIXED_ONE - HALF_PLAYER);
+        }
+        assert(getEnemyHp(aimed.enemies[0]) < initialHp);
+    }
 }
 
 // Independent floating-point reference is test-only; gameplay uses integer geometry.
@@ -634,7 +813,7 @@ int main() {
     testContactAndSpawns();
     testEnemyBoundariesAndSpeed();
     testAbilitiesAndCombat();
-    testBurstFire();
+    testPassiveFireUpgrades();
     testGeometry();
     testLiveCombatStress();
     std::puts("Combat regressions passed: waves, timer, shop, health, abilities, pools, 50000 geometry rays.");

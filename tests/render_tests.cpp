@@ -27,27 +27,24 @@ int main() {
         game.shop.category = static_cast<ShopCategory>(category);
         for (uint8_t selected = 0; selected < 3; ++selected) {
             game.shop.selectedIndex = selected;
-            game.combat.playerScore = 0;
+            game.combat.playerScore = 1000;
             renderGame(display, game);
             assert(std::strncmp(&display.text[0][3], category ? "ACTIVE UPGRADE" : "PASSIVE UPGRADE",
                                 category ? 14 : 15) == 0);
             assert(display.text[7][8] == '1' + selected);
-            assert(std::strncmp(&display.text[6][7], "X FUNDS", 7) == 0);
-            game.combat.playerScore = 1000;
-            renderGame(display, game);
             if (category) {
                 game.shop.choosingSlot = true;
-                for (uint8_t id = 0; id <= 4; ++id) {
+                for (uint8_t id = 0; id <= 8; ++id) {
                     game.player.slots[0].ability = game.player.slots[1].ability = static_cast<AbilityId>(id);
                     renderGame(display, game);
                 }
                 game.shop.choosingSlot = false;
             } else {
-                game.passives.damageLevel = 3;
-                game.player.maxHp = PLAYER_MAX_HP_CAP;
-                game.passives.moveSpeedLevel = 3;
+                const PassiveId choice = static_cast<PassiveId>(
+                    shopChoice(game, ShopCategory::Passive, selected));
+                setPassiveLevel(game.passives, choice, passiveCap(choice));
+                game.combat.playerScore = 65535;
                 renderGame(display, game);
-                assert(std::strncmp(&display.text[6][8], "X MAX", 5) == 0);
             }
         }
     }
@@ -94,7 +91,7 @@ int main() {
         if (score == 10000) assert(std::strncmp(&display.text[2][17], "10k", 3) == 0);
         if (score == 11000) assert(std::strncmp(&display.text[2][17], "11k", 3) == 0);
     }
-    for (uint8_t id = 1; id <= 4; ++id) {
+    for (uint8_t id = 1; id <= 8; ++id) {
         game.player.slots[0].ability = static_cast<AbilityId>(id);
         game.player.slots[0].cooldown = abilityCooldown(game.player.slots[0].ability);
         renderGame(display, game);
@@ -105,7 +102,7 @@ int main() {
         renderGame(display, game);
         assert(display.pixels[34][127 - 1] == WHITE);
     }
-    game.combat.scoreOrbs[0] = {70 * FIXED_ONE, 20 * FIXED_ONE, 5, 1};
+    game.combat.scoreOrbs[0] = {70, 20, 5, 1};
     renderGame(display, game);
     const uint8_t coinShape[] = {14, 23, 23, 31, 14};
     for (uint8_t row = 0; row < 5; ++row)
@@ -125,8 +122,10 @@ int main() {
                    (edge[0] ? ARENA_WIDTH - ENEMY_HALF_WIDTH : ENEMY_HALF_WIDTH) * 16,
                    (edge[1] ? ARENA_HEIGHT - ENEMY_HALF_HEIGHT : ENEMY_HALF_HEIGHT) * 16, 16,
                    game.combat.currentStage);
-        game.combat.scoreOrbs[0] = {int16_t(edge[0] * 16), int16_t(edge[1] * 16), 5, 1};
-        game.combat.projectiles[0] = {int16_t(edge[0] * 16), int16_t(edge[1] * 16), 32, 0, 1};
+        game.combat.scoreOrbs[0] = {edge[0], edge[1], 5, 1};
+        game.combat.projectiles[0] = {
+            static_cast<uint8_t>(edge[0] * 2),
+            static_cast<uint8_t>(edge[1] * 2), 0, 1};
         game.combat.spawnTimer = 1;
         renderGame(display, game);
         for (uint8_t y = 0; y < 64; ++y) assert(std::memcmp(sidebar[y], &display.pixels[y][104], 24) == 0);

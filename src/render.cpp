@@ -5,7 +5,6 @@
 #include "arena.h"
 
 #include "assets/menu_screens.h"
-#include "assets/stage_layouts.h"
 #include "lzss.h"
 
 #include "stages.h"
@@ -76,41 +75,18 @@ void drawMenuScreen(Arduboy2 &arduboy, uint8_t screenCount) {
 #endif
 }
 
-// Рисуем белую разметку стен стейджа поверх арены (влево от колонки UI).
-// Стейдж 1 — пустое поле. Маски — page-column битовые карты: на AVR копируем
-// байты прямо в кадровый буфер (страница*128+колонка), на хосте — попиксельно.
+// Рисуем горизонтальные runs сжатой карты стен.
 void drawStageMap(Arduboy2 &arduboy, uint8_t stage) {
-  const uint8_t *map;
-  switch (stage) {
-  case 1:
-    map = stage2_map;
-    break;
-  case 2:
-    map = stage3_map;
-    break;
-  default:
-    return;
-  }
-#if defined(__AVR__)
-  uint8_t *frame = arduboy.getBuffer();
-  for (uint8_t page = 0; page < ARENA_HEIGHT / 8; ++page) {
-    for (uint8_t x = 0; x < ARENA_WIDTH; ++x) {
-      const uint8_t column = pgm_read_byte(&map[page * ARENA_WIDTH + x]);
-      if (column) {
-        frame[page * 128 + x] |= column;
-      }
-    }
-  }
-#else
   for (uint8_t y = 0; y < ARENA_HEIGHT; ++y) {
-    for (uint8_t x = 0; x < ARENA_WIDTH; ++x) {
-      const uint8_t byte = pgm_read_byte(&map[(y >> 3) * ARENA_WIDTH + x]);
-      if (byte & (1u << (y & 7))) {
-        arduboy.drawPixel(x, HUD_HEIGHT + y, WHITE);
-      }
+    const uint8_t* row = stageWallRow(stage, y);
+    if (row == nullptr) return;
+    uint8_t runs = pgm_read_byte(row++);
+    while (runs--) {
+      const uint8_t x = pgm_read_byte(row++);
+      const uint8_t length = pgm_read_byte(row++);
+      arduboy.drawFastHLine(x, HUD_HEIGHT + y, length, WHITE);
     }
   }
-#endif
 }
 
 // Хитбокс игрока остаётся PLAYER_SIZE, визуальный холст 9x7 центрируем по
@@ -146,11 +122,15 @@ void drawProjectile(Arduboy2 &arduboy, const Projectile &projectile) {
   if (projectile.framesLeft == 0) {
     return;
   }
+  const int16_t projectilePosX = projectileX(projectile);
+  const int16_t projectilePosY = projectileY(projectile);
+  const int8_t velocityX = projectileVelocityX(projectile);
+  const int8_t velocityY = projectileVelocityY(projectile);
   for (uint8_t part = 0; part < 3; ++part) {
     const int16_t x = wrapCoordinate(
-        projectile.x - projectile.velocityX * part / 2, ARENA_WIDTH_FIXED);
+        projectilePosX - velocityX * part / 2, ARENA_WIDTH_FIXED);
     const int16_t y = wrapCoordinate(
-        projectile.y - projectile.velocityY * part / 2, ARENA_HEIGHT_FIXED);
+        projectilePosY - velocityY * part / 2, ARENA_HEIGHT_FIXED);
     drawArenaPixel(arduboy, x / FIXED_ONE, y / FIXED_ONE, WHITE);
   }
 }
@@ -244,9 +224,8 @@ void drawScoreOrb(Arduboy2 &arduboy, const ScoreOrb &orb) {
     return;
   }
 
-  const int16_t screenX = wrapCoordinate(orb.x / FIXED_ONE, ARENA_WIDTH);
-  const int16_t screenY =
-      HUD_HEIGHT + wrapCoordinate(orb.y / FIXED_ONE, ARENA_HEIGHT);
+  const int16_t screenX = orb.x;
+  const int16_t screenY = HUD_HEIGHT + orb.y;
 
   for (uint8_t row = 0; row < 5; ++row) {
     const uint8_t bits = pgm_read_byte(&scoreCoinBitmap[row]);
@@ -296,14 +275,26 @@ void printAbility(Arduboy2 &arduboy, AbilityId ability) {
   case AbilityId::Dash:
     arduboy.print(F("Dash"));
     break;
+  case AbilityId::TimeWarp:
+    arduboy.print(F("Warp"));
+    break;
+  case AbilityId::RecursiveCall:
+    arduboy.print(F("Clone"));
+    break;
+  case AbilityId::Free:
+    arduboy.print(F("free"));
+    break;
+  case AbilityId::BitShift:
+    arduboy.print(F("Shift"));
+    break;
   case AbilityId::MarkAndSweep:
     arduboy.print(F("Sweep"));
     break;
-  case AbilityId::StopTheWorld:
-    arduboy.print(F("Freeze"));
+  case AbilityId::StackOverflow:
+    arduboy.print(F("Stack"));
     break;
-  case AbilityId::Compact:
-    arduboy.print(F("Compact"));
+  case AbilityId::MemoryDump:
+    arduboy.print(F("Dump"));
     break;
   default:
     arduboy.print(F("Empty"));
@@ -332,59 +323,58 @@ void drawShopHeader(Arduboy2 &arduboy, const Game &game) {
   arduboy.print(game.combat.playerScore);
 }
 
-bool passiveAtCap(const Game &game, PassiveId id) {
+void drawPassiveCard(Arduboy2 &arduboy, const Game& game, PassiveId id) {
+  arduboy.setCursor(28, 16);
   switch (id) {
-  case PassiveId::DamageUp:
-    return game.passives.damageLevel >= 3;
-  case PassiveId::MaxHpUp:
-    return game.player.maxHp >= PLAYER_MAX_HP_CAP;
-  case PassiveId::MoveSpeedUp:
-    return game.passives.moveSpeedLevel >= 3;
-  default:
-    return true;
-  }
-}
-
-void drawPassiveCard(Arduboy2 &arduboy, PassiveId id) {
-  arduboy.setCursor(43, 16);
-  switch (id) {
-  case PassiveId::DamageUp:
-    arduboy.print(F("DAMAGE"));
-    arduboy.setCursor(31, 24);
-    arduboy.print(F("SHOT DMG +1"));
+  case PassiveId::CompilerOptimization:
+    arduboy.print(F("COMPILER OPT"));
     break;
-  case PassiveId::MaxHpUp:
-    arduboy.print(F("MAX HP"));
-    arduboy.setCursor(28, 24);
-    arduboy.print(F("HP+1 HEAL+1"));
+  case PassiveId::Overclock:
+    arduboy.print(F("OVERCLOCK"));
     break;
-  case PassiveId::MoveSpeedUp:
-    arduboy.print(F("SPEED"));
-    arduboy.setCursor(34, 24);
-    arduboy.print(F("MOVE +2/16"));
+  case PassiveId::OptimizedBuild:
+    arduboy.print(F("OPT BUILD"));
+    break;
+  case PassiveId::MemoryFragmentation:
+    arduboy.print(F("MEM FRAG"));
+    break;
+  case PassiveId::CollectionRange:
+    arduboy.print(F("COL RANGE"));
+    break;
+  case PassiveId::RamCapacity:
+    arduboy.print(F("RAM CAPACITY"));
     break;
   default:
     break;
   }
+  const uint8_t level = passiveLevel(game.passives, id);
+  arduboy.setCursor(100, 16);
+  for (uint8_t i = 0; i < level; ++i) arduboy.print(F("+"));
 }
 
-void drawActiveCard(Arduboy2 &arduboy, ActiveUpgradeId id) {
-  arduboy.setCursor(43, 16);
+void drawActiveCard(Arduboy2 &arduboy, AbilityId id) {
+  arduboy.setCursor(34, 16);
   switch (id) {
-  case ActiveUpgradeId::MarkAndSweep:
+  case AbilityId::TimeWarp:
+    arduboy.print(F("TIME WARP"));
+    break;
+  case AbilityId::RecursiveCall:
+    arduboy.print(F("RECURSIVE"));
+    break;
+  case AbilityId::Free:
+    arduboy.print(F("free()"));
+    break;
+  case AbilityId::BitShift:
+    arduboy.print(F("BIT SHIFT"));
+    break;
+  case AbilityId::MarkAndSweep:
     arduboy.print(F("SWEEP"));
-    arduboy.setCursor(25, 24);
-    arduboy.print(F("DMG4 R24 CD3S"));
     break;
-  case ActiveUpgradeId::StopTheWorld:
-    arduboy.print(F("FREEZE"));
-    arduboy.setCursor(22, 24);
-    arduboy.print(F("FREEZE90F CD4S"));
+  case AbilityId::StackOverflow:
+    arduboy.print(F("STACK O/F"));
     break;
-  case ActiveUpgradeId::Compact:
-    arduboy.print(F("COMPACT"));
-    arduboy.setCursor(16, 24);
-    arduboy.print(F("DROPS SH60F CD3S"));
+  case AbilityId::MemoryDump:
+    arduboy.print(F("MEM DUMP"));
     break;
   default:
     break;
@@ -482,6 +472,45 @@ void drawUIColumn(Arduboy2 &arduboy, const Game &game) {
     } else {
       arduboy.print(F(":--"));
     }
+  }
+}
+
+void drawCombatEffects(Arduboy2& arduboy, const Game& game) {
+  const Combat& combat = game.combat;
+  if (combat.puddleTicks) {
+    for (int8_t offset = -MEMORY_DUMP_RADIUS; offset <= MEMORY_DUMP_RADIUS;
+         offset += 4) {
+      drawArenaPixel(arduboy, combat.puddleX + offset,
+                     combat.puddleY - MEMORY_DUMP_RADIUS, WHITE);
+      drawArenaPixel(arduboy, combat.puddleX + offset,
+                     combat.puddleY + MEMORY_DUMP_RADIUS, WHITE);
+      drawArenaPixel(arduboy, combat.puddleX - MEMORY_DUMP_RADIUS,
+                     combat.puddleY + offset, WHITE);
+      drawArenaPixel(arduboy, combat.puddleX + MEMORY_DUMP_RADIUS,
+                     combat.puddleY + offset, WHITE);
+    }
+  }
+  if (combat.recursiveTicks) {
+    Player clone = game.player;
+    clone.dashFrames = 0;
+    clone.x = wrapCoordinate(clone.x - 8 * FIXED_ONE, ARENA_WIDTH_FIXED);
+    drawPlayer(arduboy, clone);
+    clone.x = wrapCoordinate(clone.x + 16 * FIXED_ONE, ARENA_WIDTH_FIXED);
+    drawPlayer(arduboy, clone);
+  }
+  const uint8_t effectFrames = combat.visualEffect & 0x0F;
+  if ((combat.visualEffect & 0xF0) == 0x10) {
+    for (uint8_t y = effectFrames & 3; y < ARENA_HEIGHT; y += 4)
+      for (uint8_t x = (y + effectFrames) & 3; x < ARENA_WIDTH; x += 4)
+        drawArenaPixel(arduboy, x, y, WHITE);
+  } else if ((combat.visualEffect & 0xF0) == 0x20) {
+    const int16_t px = game.player.x / FIXED_ONE + PLAYER_SIZE / 2;
+    const int16_t py = game.player.y / FIXED_ONE + PLAYER_SIZE / 2;
+    const uint8_t radius = (9 - effectFrames) * 3;
+    drawArenaPixel(arduboy, px + radius, py, WHITE);
+    drawArenaPixel(arduboy, px - radius, py, WHITE);
+    drawArenaPixel(arduboy, px, py + radius, WHITE);
+    drawArenaPixel(arduboy, px, py - radius, WHITE);
   }
 }
 
@@ -626,8 +655,9 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
     if (game.shop.choosingSlot) {
       arduboy.setCursor(0, 16);
       arduboy.print(F("EQUIP "));
-      printAbility(arduboy, abilityFromUpgrade(static_cast<ActiveUpgradeId>(
-                                game.shop.activeChoices[game.shop.selectedIndex])));
+      printAbility(arduboy, static_cast<AbilityId>(
+                                shopChoice(game, ShopCategory::Active,
+                                           game.shop.selectedIndex)));
       arduboy.setCursor(0, 24);
       arduboy.print(F("A: "));
       printAbility(arduboy, game.player.slots[0].ability);
@@ -641,25 +671,19 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
       return;
     }
     const bool active = game.shop.category == ShopCategory::Active;
-    const uint8_t choice = active
-        ? game.shop.activeChoices[game.shop.selectedIndex]
-        : game.shop.passiveChoices[game.shop.selectedIndex];
+    const uint8_t choice = shopChoice(game, game.shop.category,
+                                      game.shop.selectedIndex);
     if (active)
-      drawActiveCard(arduboy, static_cast<ActiveUpgradeId>(choice));
+      drawActiveCard(arduboy, static_cast<AbilityId>(choice));
     else
-      drawPassiveCard(arduboy, static_cast<PassiveId>(choice));
+      drawPassiveCard(arduboy, game, static_cast<PassiveId>(choice));
 
-    const uint16_t price = active ? ACTIVE_PRICE : PASSIVE_PRICE;
+    const uint16_t price = active
+        ? activePrice(static_cast<AbilityId>(choice))
+        : passivePrice(game, static_cast<PassiveId>(choice));
     arduboy.setCursor(52, 40);
     arduboy.print(F("$"));
     arduboy.print(price);
-    if (game.combat.playerScore < price) {
-      arduboy.setCursor(43, 48);
-      arduboy.print(F("X FUNDS"));
-    } else if (!active && passiveAtCap(game, static_cast<PassiveId>(choice))) {
-      arduboy.setCursor(49, 48);
-      arduboy.print(F("X MAX"));
-    }
     arduboy.setCursor(4, 56);
     arduboy.print(F("A BUY  <"));
     arduboy.print(game.shop.selectedIndex + 1);
@@ -722,6 +746,7 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
       drawScoreOrb(arduboy, game.combat.scoreOrbs[i]);
     }
     // Игрок (без мигания)
+    drawCombatEffects(arduboy, game);
     drawPlayer(arduboy, game.player);
     // Пули
     for (uint8_t i = 0; i < MAX_PROJECTILES; ++i) {
@@ -762,6 +787,7 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   }
 
   // Hidden phases affect only rendering, not collision.
+  drawCombatEffects(arduboy, game);
   if (!isPlayerBlinking(game.player)) {
     drawPlayer(arduboy, game.player);
   }

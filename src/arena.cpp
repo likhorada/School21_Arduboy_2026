@@ -14,50 +14,56 @@
 #ifndef pgm_read_ptr
 #define pgm_read_ptr(addr) (*(void const *const *)(addr))
 #endif
+#ifndef pgm_read_word
+#define pgm_read_word(addr) (*(const uint16_t *)(addr))
+#endif
 #endif
 
 namespace gc {
 namespace {
 
-// Пиксель стены из попиксельной битовой маски стейджа: page-column упаковка
-// (один байт на (страницу, колонку)), поэтому запрос — одно чтение + бит-тест.
-// Стейдж 1 (индекс 0) пустой и маски не имеет.
-bool stageMapPixel(const uint8_t* map, uint8_t x, uint8_t y) {
-  const uint8_t byte = pgm_read_byte(&map[(y >> 3) * ARENA_WIDTH + x]);
-  return (byte & (1u << (y & 7))) != 0;
-}
-
-const uint8_t* stageWallMap(uint8_t stage) {
-  switch (stage) {
-  case 1:
-    return stage2_map;
-  case 2:
-    return stage3_map;
-  default:
-    return nullptr;
-  }
-}
-
 // Пиксель стены c поворотом через край: fixed-координата оборачивается и
 // проверяется через битовую маску стейджа.
 bool wallAtFixed(uint8_t stage, int16_t fixedX, int16_t fixedY) {
-  const uint8_t* map = stageWallMap(stage);
-  if (map == nullptr) {
-    return false;
-  }
   const uint8_t x = wrapCoordinate(fixedX, ARENA_WIDTH_FIXED) / FIXED_ONE;
   const uint8_t y = wrapCoordinate(fixedY, ARENA_HEIGHT_FIXED) / FIXED_ONE;
-  return stageMapPixel(map, x, y);
+  return stageWallPixel(stage, x, y);
 }
 
 } // внутренние функции модуля
+
+const uint8_t* stageWallRow(uint8_t stage, uint8_t y) {
+  const uint8_t* rows;
+  const uint16_t* blocks;
+  if (stage == 1) {
+    rows = stage2_rows;
+    blocks = stage2_blocks;
+  } else if (stage == 2) {
+    rows = stage3_rows;
+    blocks = stage3_blocks;
+  } else {
+    return nullptr;
+  }
+  const uint8_t withinBlock = y & 7;
+  const uint8_t* row = rows + pgm_read_word(&blocks[y >> 3]);
+  for (uint8_t i = 0; i < withinBlock; ++i)
+    row += 1 + pgm_read_byte(row) * 2;
+  return row;
+}
 
 bool stageWallPixel(uint8_t stage, uint8_t x, uint8_t y) {
   if (x >= ARENA_WIDTH || y >= ARENA_HEIGHT) {
     return false;
   }
-  const uint8_t* map = stageWallMap(stage);
-  return map != nullptr && stageMapPixel(map, x, y);
+  const uint8_t* row = stageWallRow(stage, y);
+  if (row == nullptr) return false;
+  uint8_t runs = pgm_read_byte(row++);
+  while (runs--) {
+    const uint8_t start = pgm_read_byte(row++);
+    const uint8_t length = pgm_read_byte(row++);
+    if (x >= start && x < start + length) return true;
+  }
+  return false;
 }
 
 // Оборачиваем координату через границу арены (тор).

@@ -17,26 +17,48 @@ enum class GameState : uint8_t {
     GameOver,
     Win
 };
-enum class AbilityId : uint8_t { None, Dash, MarkAndSweep, StopTheWorld, Compact };
+enum class AbilityId : uint8_t {
+    None,
+    Dash,
+    TimeWarp,
+    RecursiveCall,
+    Free,
+    BitShift,
+    MarkAndSweep,
+    StackOverflow,
+    MemoryDump
+};
 inline uint8_t abilityCooldown(AbilityId id) {
-    return id == AbilityId::None ? 0 : (id == AbilityId::MarkAndSweep ? 180 :
-           (id == AbilityId::Compact ? 200 : 250));
+    switch (id) {
+    case AbilityId::Dash: return DASH_COOLDOWN;
+    case AbilityId::TimeWarp: return TIME_WARP_COOLDOWN;
+    case AbilityId::RecursiveCall: return RECURSIVE_COOLDOWN;
+    case AbilityId::Free: return FREE_COOLDOWN;
+    case AbilityId::BitShift: return BIT_SHIFT_COOLDOWN;
+    case AbilityId::MarkAndSweep: return SWEEP_COOLDOWN;
+    case AbilityId::StackOverflow: return STACK_OVERFLOW_COOLDOWN;
+    case AbilityId::MemoryDump: return MEMORY_DUMP_COOLDOWN;
+    default: return 0;
+    }
 }
 inline uint8_t heartState(uint8_t hp, uint8_t index) {
     return hp > 4 + index ? 2 : (hp > index ? 1 : 0);
 }
 
 // Пассивные апгрейды
-enum class PassiveId : uint8_t { None, DamageUp, MaxHpUp, MoveSpeedUp };
-
-// Активные апгрейды (покупаются в магазине)
-enum class ActiveUpgradeId : uint8_t { None, MarkAndSweep, StopTheWorld, Compact };
+enum class PassiveId : uint8_t {
+    None,
+    CompilerOptimization,
+    Overclock,
+    OptimizedBuild,
+    MemoryFragmentation,
+    CollectionRange,
+    RamCapacity
+};
 
 enum class ShopCategory : uint8_t { Passive, Active };
 
-inline AbilityId abilityFromUpgrade(ActiveUpgradeId id) {
-    return static_cast<AbilityId>(static_cast<uint8_t>(id) + 1);
-}
+struct Game;
 
 // Слот активки: какая способность + кулдаун
 struct ActiveSlot {
@@ -90,19 +112,31 @@ inline bool isPlayerBlinking(const Player& player) {
 
 // Пассивные апгрейды игрока
 struct PlayerPassives {
-    uint8_t damageLevel;      // 0-3: +урон за уровень
-    uint8_t maxHpLevel;       // 0-2: +1 макс HP за уровень (до 6)
-    uint8_t moveSpeedLevel;   // 0-3: +скорость за уровень
+    uint16_t levels;
 };
+
+inline uint8_t passiveLevel(const PlayerPassives& passives, PassiveId id) {
+    if (id == PassiveId::None) return 0;
+    return (passives.levels >> ((static_cast<uint8_t>(id) - 1) * 2)) & 0x03;
+}
+
+inline void setPassiveLevel(PlayerPassives& passives, PassiveId id, uint8_t level) {
+    const uint8_t shift = (static_cast<uint8_t>(id) - 1) * 2;
+    passives.levels = (passives.levels & ~(uint16_t(0x03) << shift)) |
+                      (uint16_t(level & 0x03) << shift);
+}
+
+uint8_t passiveCap(PassiveId id);
+uint16_t passivePrice(const Game& game, PassiveId id);
+uint16_t activePrice(AbilityId id);
 
 // Магазин: одна из трёх карточек текущей категории.
 struct ShopState {
     uint8_t selectedIndex;        // 0-2: текущая карточка карусели
-    uint8_t passiveChoices[SHOP_PASSIVE_CHOICES];
-    uint8_t activeChoices[SHOP_ACTIVE_CHOICES];
     ShopCategory category;
     bool choosingSlot;
     int8_t previousMoveX;
+    uint8_t seed;
 };
 
 struct MenuState {
@@ -147,6 +181,9 @@ void updateShop(Game& game, const InputFrame& input);
 
 // Применение выбранного апгрейда
 void applyShopChoice(Game& game);
+
+// Детерминированная карточка текущего магазина; три карточки уникальны.
+uint8_t shopChoice(const Game& game, ShopCategory category, uint8_t index);
 
 // Обновление на один кадр
 void updateGame(Game& game, const InputFrame& input);

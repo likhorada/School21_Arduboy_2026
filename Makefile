@@ -19,6 +19,7 @@ build:
 
 test:
 	mkdir -p "$(BUILD)/tests"
+	python3 tools/test_convert_assets.py
 	$(CXX) -std=c++11 -O2 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/lzss.cpp tests/gameplay_tests.cpp -o "$(BUILD)/tests/gameplay_tests"
 	"$(BUILD)/tests/gameplay_tests"
 	$(CXX) -std=c++11 -O2 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/lzss.cpp tests/combat_tests.cpp -o "$(BUILD)/tests/combat_tests"

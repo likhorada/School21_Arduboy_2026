@@ -21,7 +21,7 @@ constexpr uint8_t PLAYER_START_Y = 30;
 constexpr uint8_t WALK_SPEED = 16;
 constexpr uint8_t DASH_SPEED = 64;
 constexpr uint8_t DASH_DURATION = 6;
-constexpr uint8_t DASH_COOLDOWN = 250;
+constexpr uint8_t DASH_IFRAME_DURATION = 19;
 constexpr uint8_t ACTIVE_SLOT_COUNT = 2;
 constexpr uint8_t MAX_MOVE_STEPS = (DASH_SPEED + FIXED_ONE - 1) / FIXED_ONE;
 
@@ -35,12 +35,10 @@ constexpr uint8_t PAUSE_HOLD_FRAMES = 31;
 // Код Конани: окно между нажатиями и длина последовательности.
 constexpr uint8_t KONAMI_TIMEOUT = 60; // ~1 секунда на шаг кода.
 constexpr uint8_t KONAMI_SEQUENCE_SIZE = 10;
+constexpr uint16_t KONAMI_BALANCE = 10000; // Баланс, выдаваемый читом
 
-constexpr uint8_t MAX_PROJECTILES = 4;
-constexpr uint8_t SHOT_INTERVAL = 15; // 0,4 секунды между подходами очереди.
-constexpr uint8_t SHOT_BURST_COUNT =
-    2; // Пуль за подход (1 = обычный одиночный).
-constexpr uint8_t SHOT_BURST_DELAY = 4; // Пауза между пулями очередью.
+constexpr uint8_t MAX_PROJECTILES = 12;
+constexpr uint8_t SHOT_INTERVAL = 32; // 0,4 секунды между залпами.
 constexpr uint8_t SHOT_DAMAGE = 1;
 constexpr uint8_t SHOT_RANGE = 48; // Пиксели от центра игрока до центра цели.
 constexpr int16_t SHOT_RANGE_FIXED = SHOT_RANGE * FIXED_ONE;
@@ -56,7 +54,6 @@ constexpr uint8_t AIM_PREVIEW_FRAMES =
 static_assert(WALK_SPEED > 0 && WALK_SPEED <= DASH_SPEED, "Invalid walk speed");
 static_assert(DASH_SPEED <= 127 && DASH_DURATION > 0,
               "Invalid dash parameters");
-static_assert(DASH_COOLDOWN >= DASH_DURATION, "Cooldown must cover the dash");
 static_assert(PLAYER_SIZE < ARENA_HEIGHT && PLAYER_SIZE < ARENA_WIDTH,
               "Player must fit within one period of the arena");
 static_assert(PROJECTILE_SPEED > 0 && PROJECTILE_SPEED <= 127,
@@ -65,9 +62,6 @@ static_assert(SHOT_RANGE > 0 && SHOT_RANGE <= ARENA_WIDTH / 2,
               "Aim preview is limited to the short route");
 static_assert(PROJECTILE_LIFETIME >= AIM_PREVIEW_FRAMES && SHOT_DAMAGE > 0,
               "Shots must live long enough to reach a target");
-static_assert(SHOT_BURST_COUNT >= 1 && SHOT_BURST_DELAY > 0 &&
-                  SHOT_BURST_DELAY < SHOT_INTERVAL,
-              "Burst bullets must be quicker than the full reload");
 
 // === ИГРОВЫЕ КОНСТАНТЫ ===
 // HP и неуязвимость
@@ -85,12 +79,29 @@ static_assert(STAGE_TIME_FRAMES == 3750,
 inline uint8_t remainingSeconds(uint16_t frames) {
   return uint32_t(frames) * FRAME_DURATION_MS / 1000;
 }
-constexpr uint16_t PASSIVE_PRICE = 100;
-constexpr uint16_t ACTIVE_PRICE = 200;
-constexpr uint8_t SWEEP_DAMAGE = 4;
+constexpr uint8_t COOLDOWN_TICK_FRAMES = 4;
+constexpr uint8_t DASH_COOLDOWN = 63;
+constexpr uint8_t TIME_WARP_COOLDOWN = 125;
+constexpr uint8_t RECURSIVE_COOLDOWN = 157;
+constexpr uint8_t FREE_COOLDOWN = 157;
+constexpr uint8_t BIT_SHIFT_COOLDOWN = 125;
+constexpr uint8_t SWEEP_COOLDOWN = 94;
+constexpr uint8_t STACK_OVERFLOW_COOLDOWN = 94;
+constexpr uint8_t MEMORY_DUMP_COOLDOWN = 157;
+
+constexpr uint8_t TIME_WARP_DURATION = 79;
+constexpr uint8_t RECURSIVE_DURATION = 63;
+constexpr uint8_t BIT_SHIFT_DURATION = 63;
+constexpr uint8_t MEMORY_DUMP_DURATION = 79;
+constexpr uint8_t MEMORY_DUMP_PULSE_TICKS = 8;
+constexpr uint8_t MEMORY_DUMP_RADIUS = 12;
+constexpr uint8_t STACK_OVERFLOW_SHOTS = 12;
+constexpr uint8_t STACK_OVERFLOW_DELAY = 5;
+
+constexpr uint8_t SWEEP_DAMAGE = 2;
 constexpr uint8_t SWEEP_RADIUS = 24;
-constexpr uint8_t FREEZE_DURATION = 90;
-constexpr uint8_t COMPACT_SHIELD_DURATION = 60;
+constexpr uint8_t SWEEP_PUSH = 12;
+constexpr uint8_t FREE_DAMAGE = 6;
 
 // UI: правая колонка x=104 (128-24), 6 строк по 8px
 constexpr uint8_t UI_COLUMN_X = 104;
@@ -104,5 +115,9 @@ constexpr uint16_t STAGE_TIME_BONUS_MULT = 100;
 // Магазин: количество вариантов
 constexpr uint8_t SHOP_PASSIVE_CHOICES = 3;
 constexpr uint8_t SHOP_ACTIVE_CHOICES = 3;
+constexpr uint16_t PASSIVE_PRICE = 500;
+constexpr uint16_t RAM_CAPACITY_PRICE = 1000;
+constexpr uint16_t ACTIVE_PRICE = 900;
+constexpr uint16_t EXPENSIVE_ACTIVE_PRICE = 1500;
 
 } // namespace gc
