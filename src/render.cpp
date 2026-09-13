@@ -35,11 +35,18 @@ const uint8_t scoreCoinBitmap[] PROGMEM = {
     0b01110, 0b10111, 0b10111, 0b11111, 0b01110,
 };
 
-// Спрайт игрока 7×7 пикселей, хранится во flash (PROGMEM).
-const uint8_t playerBitmap[] PROGMEM = {0x3e, 0x7f, 0x55, 0x5d,
-                                        0x55, 0x7f, 0x3e};
-static_assert(sizeof(playerBitmap) == PLAYER_SIZE && PLAYER_SIZE == 7,
-              "Update the player bitmap when changing the hitbox");
+// Кадры игрока: холст 9x7, колонно-мажорно (байт на колонку, бит = строка).
+#include "assets/player_frames.h"
+
+constexpr uint8_t PLAYER_FRAME_W = sizeof(playerFrames[0]);
+constexpr uint8_t PLAYER_FRAME_H = 7;
+constexpr uint8_t WALK_ANIM_FRAMES = 8; // Смена кадра ходьбы каждые ~0.13 с.
+// Цикл ходьбы: левая поза, широкие ноги, правая поза, снова широкие ноги.
+const uint8_t playerAnimCycle[] PROGMEM = {0, 1, 2, 1};
+static_assert(sizeof(playerFrames) % PLAYER_FRAME_W == 0,
+              "Player frames must have equal column counts");
+static_assert(PLAYER_FRAME_W == 9 && PLAYER_FRAME_H == 7,
+              "Player sprite must stay on its 9x7 canvas");
 
 // Рисуем пиксель арены с переходом через края.
 // Сначала оборачиваем координаты, потом добавляем смещение HUD.
@@ -65,20 +72,29 @@ void applyScreenDelta(uint8_t *buf, const uint8_t *delta) {
   }
 }
 
-// Переносим пиксели через края по отдельности, не затрагивая HUD.
-// Тёмный глаз показывает направление; при Dash остальной силуэт заполняется
-// белым.
+// Хитбокс игрока остаётся PLAYER_SIZE, визуальный холст 9x7 центрируем по
+// нему: сдвиг влево на (7-9)/2 = -1 пиксель. Во время Dash весь холст белый.
+// Кадр ходьбы выбирается фазой walkPhase; покой показывает нулевой кадр.
 void drawPlayer(Arduboy2 &arduboy, const Player &player) {
-  const int16_t x = player.x / FIXED_ONE;
-  const int16_t y = player.y / FIXED_ONE;
-  const int8_t facingX = getFacingX(player);
-  const int8_t facingY = getFacingY(player);
-  for (uint8_t column = 0; column < PLAYER_SIZE; ++column) {
-    const uint8_t bits = pgm_read_byte(&playerBitmap[column]);
-    for (uint8_t row = 0; row < PLAYER_SIZE; ++row) {
-      const bool eye = column == 3 + facingX * 2 && row == 3 + facingY * 2;
-      const bool lit = !eye && ((bits & (1 << row)) || player.dashFrames > 0);
-      drawArenaPixel(arduboy, x + column, y + row, lit ? WHITE : BLACK);
+  const int16_t x = player.x / FIXED_ONE - (PLAYER_SIZE - PLAYER_FRAME_W) / 2;
+  const int16_t y = player.y / FIXED_ONE - (PLAYER_SIZE - PLAYER_FRAME_H) / 2;
+  if (player.dashFrames > 0) {
+    for (uint8_t column = 0; column < PLAYER_FRAME_W; ++column)
+      for (uint8_t row = 0; row < PLAYER_FRAME_H; ++row)
+        drawArenaPixel(arduboy, x + column, y + row, WHITE);
+    return;
+  }
+  const uint8_t frame = player.walkPhase
+                          ? pgm_read_byte(&playerAnimCycle[(player.walkPhase /
+                                                            WALK_ANIM_FRAMES) &
+                                                           (sizeof(playerAnimCycle) - 1)])
+                          : 0;
+  const uint8_t *bits = &playerFrames[frame][0];
+  for (uint8_t column = 0; column < PLAYER_FRAME_W; ++column) {
+    const uint8_t columnBits = pgm_read_byte(bits + column);
+    for (uint8_t row = 0; row < PLAYER_FRAME_H; ++row) {
+      if (columnBits & (1 << row))
+        drawArenaPixel(arduboy, x + column, y + row, WHITE);
     }
   }
 }

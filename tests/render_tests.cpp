@@ -11,6 +11,7 @@
 #include "assets/soundmenu_off.h"
 #include "assets/soundmenu_on.h"
 #include "assets/menu_frames.h"
+#include "assets/player_frames.h"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -157,5 +158,40 @@ int main() {
         renderGame(display, game);
         for (uint8_t y = 0; y < 64; ++y) assert(std::memcmp(sidebar[y], &display.pixels[y][104], 24) == 0);
     }
-    std::puts("Render regressions passed: screen bounds, menu text, hearts, score, cooldowns, arena isolation.");
+    // Спрайт игрока: кадры совпадают с артом на чистой зоне (20,20), покой и
+    // ходьба переключают кадры, Dash заливает весь холст белым. Процедурного
+    // глаза направления больше нет — фигура симметрична кадрам без чёрных точек.
+    {
+        game.state = GameState::Playing;
+        game.combat = {};
+        game.combat.currentStage = 0;
+        game.combat.spawnTimer = 0;
+        game.player.x = 20 * FIXED_ONE;
+        game.player.y = 20 * FIXED_ONE;
+        game.player.dashFrames = 0;
+        game.player.iframes = 0;
+        // Холст рисуется со сдвигом (середина 7px хитбокса / холст 9px).
+        const int16_t canvasX = 20 + 1, canvasY = 20;
+        const uint8_t cycle[8] = {0, 1, 2, 1, 0, 1, 2, 1};
+        for (uint8_t ci : cycle) {
+            game.player.walkPhase = ci * 8 + 1;
+            renderGame(display, game);
+            for (uint8_t row = 0; row < 7; ++row)
+                for (uint8_t col = 0; col < 9; ++col)
+                    assert(display.pixels[canvasY + row][canvasX + col] ==
+                           (playerFrames[ci][col] & (1 << row) ? WHITE : BLACK));
+        }
+        game.player.walkPhase = 0;
+        renderGame(display, game);
+        for (uint8_t row = 0; row < 7; ++row)
+            for (uint8_t col = 0; col < 9; ++col)
+                assert(display.pixels[canvasY + row][canvasX + col] ==
+                       (playerFrames[0][col] & (1 << row) ? WHITE : BLACK));
+        game.player.dashFrames = 1;
+        renderGame(display, game);
+        for (uint8_t row = 0; row < 7; ++row)
+            for (uint8_t col = 0; col < 9; ++col)
+                assert(display.pixels[canvasY + row][canvasX + col] == WHITE);
+    }
+    std::puts("Render regressions passed: screen bounds, menu text, hearts, score, cooldowns, arena isolation, player sprite.");
 }

@@ -52,7 +52,8 @@ struct Player {
     int16_t y;
     uint8_t facing;
     ActiveSlot slots[ACTIVE_SLOT_COUNT];
-    uint8_t dashFrames;
+    uint8_t dashFrames;   // Кадры Dash (инвариант: после активации > 0)
+    uint8_t walkPhase;    // Фаза анимации ходьбы: растёт при движении, 0 — покой
     uint8_t hp;           // Текущее HP (0 = мёртв)
     uint8_t maxHp;        // Макс HP (база 4, кап 6 через апгрейды)
     uint8_t iframes;      // Неуязвимость после урона (в кадрах)
@@ -147,7 +148,7 @@ void applyShopChoice(Game& game);
 void updateGame(Game& game, const InputFrame& input);
 
 #ifdef __AVR__
-static_assert(sizeof(Player) == 13, "Packed player must use 13 AVR bytes");
+static_assert(sizeof(Player) == 14, "Packed player must use 14 AVR bytes");
 static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) +
                               sizeof(ShopState) + sizeof(MenuState) * 2 + 2,
               "Unexpected AVR game layout");

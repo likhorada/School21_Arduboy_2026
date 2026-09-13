@@ -309,6 +309,12 @@ void updateGame(Game& game, const InputFrame& input) {
     const bool dashing = player.dashFrames > 0;
     const int8_t dx = dashing ? getFacingX(player) : input.moveX;
     const int8_t dy = dashing ? getFacingY(player) : input.moveY;
+    // Анимация ходьбы прогрессирует только при движении; покой = кадр 0.
+    if (!dashing && (input.moveX || input.moveY)) {
+        ++player.walkPhase;
+    } else if (!dashing) {
+        player.walkPhase = 0;
+    }
     uint8_t speed = dashing ? DASH_SPEED : WALK_SPEED + game.passives.moveSpeedLevel * 2;
     if (dx && dy) speed = (uint16_t(speed) * 181 + 128) / 256;
     movePlayer(game, dx * speed, dy * speed, dashing);
