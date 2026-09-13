@@ -19,65 +19,35 @@
 namespace gc {
 namespace {
 
-// Пиксель стены из разметки стейджа: прямоугольники + горизонтальные штрихи.
-// Штрихи отсортированы по (y, x), поэтому строку ищем двоичным поиском.
-bool wallFromLayout(const uint8_t* rects, uint16_t rectCount,
-                    const uint8_t* fills, uint16_t fillCount,
-                    uint8_t x, uint8_t y) {
-  for (uint16_t i = 0; i < rectCount; ++i) {
-    const uint8_t x0 = pgm_read_byte(&rects[i * 4]);
-    const uint8_t y0 = pgm_read_byte(&rects[i * 4 + 1]);
-    const uint8_t x1 = pgm_read_byte(&rects[i * 4 + 2]);
-    const uint8_t y1 = pgm_read_byte(&rects[i * 4 + 3]);
-    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
-      return true;
-    }
-  }
-  uint16_t lo = 0;
-  uint16_t hi = fillCount;
-  while (lo < hi) {
-    const uint16_t mid = (lo + hi) / 2;
-    if (pgm_read_byte(&fills[mid * 3 + 1]) < y) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  for (uint16_t i = lo; i < fillCount; ++i) {
-    const uint8_t fy = pgm_read_byte(&fills[i * 3 + 1]);
-    if (fy != y) {
-      break;
-    }
-    const uint8_t fx = pgm_read_byte(&fills[i * 3]);
-    const uint8_t length = pgm_read_byte(&fills[i * 3 + 2]);
-    if (x >= fx && x < fx + length) {
-      return true;
-    }
-  }
-  return false;
+// Пиксель стены из попиксельной битовой маски стейджа: page-column упаковка
+// (один байт на (страницу, колонку)), поэтому запрос — одно чтение + бит-тест.
+// Стейдж 1 (индекс 0) пустой и маски не имеет.
+bool stageMapPixel(const uint8_t* map, uint8_t x, uint8_t y) {
+  const uint8_t byte = pgm_read_byte(&map[(y >> 3) * ARENA_WIDTH + x]);
+  return (byte & (1u << (y & 7))) != 0;
 }
 
-// Разметка (прямоугольники + штрихи) для стейджа; пустое поле — false.
-// Счётчики — раскрытые sizeof, без ОЗУ.
-bool stageWallFromLayout(uint8_t stage, uint8_t x, uint8_t y) {
+const uint8_t* stageWallMap(uint8_t stage) {
   switch (stage) {
   case 1:
-    return wallFromLayout(stage2_layout, sizeof(stage2_layout) / 4,
-                          stage2_fill, sizeof(stage2_fill) / 3, x, y);
+    return stage2_map;
   case 2:
-    return wallFromLayout(stage3_layout, sizeof(stage3_layout) / 4,
-                          stage3_fill, sizeof(stage3_fill) / 3, x, y);
+    return stage3_map;
   default:
-    return false;
+    return nullptr;
   }
 }
 
 // Пиксель стены c поворотом через край: fixed-координата оборачивается и
-// проверяется через разметку стейджа.
+// проверяется через битовую маску стейджа.
 bool wallAtFixed(uint8_t stage, int16_t fixedX, int16_t fixedY) {
-  const uint16_t x = wrapCoordinate(fixedX, ARENA_WIDTH_FIXED) / FIXED_ONE;
-  const uint16_t y = wrapCoordinate(fixedY, ARENA_HEIGHT_FIXED) / FIXED_ONE;
-  return stageWallFromLayout(stage, x, y);
+  const uint8_t* map = stageWallMap(stage);
+  if (map == nullptr) {
+    return false;
+  }
+  const uint8_t x = wrapCoordinate(fixedX, ARENA_WIDTH_FIXED) / FIXED_ONE;
+  const uint8_t y = wrapCoordinate(fixedY, ARENA_HEIGHT_FIXED) / FIXED_ONE;
+  return stageMapPixel(map, x, y);
 }
 
 } // внутренние функции модуля
@@ -86,7 +56,8 @@ bool stageWallPixel(uint8_t stage, uint8_t x, uint8_t y) {
   if (x >= ARENA_WIDTH || y >= ARENA_HEIGHT) {
     return false;
   }
-  return stageWallFromLayout(stage, x, y);
+  const uint8_t* map = stageWallMap(stage);
+  return map != nullptr && stageMapPixel(map, x, y);
 }
 
 // Оборачиваем координату через границу арены (тор).

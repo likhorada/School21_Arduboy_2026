@@ -61,42 +61,40 @@ void drawMenuScreen(Arduboy2 &arduboy, uint8_t screenCount) {
 }
 
 // Рисуем белую разметку стен стейджа поверх арены (влево от колонки UI).
-// Стейдж 1 — пустое поле. Рисуем прямоугольники и штрихи как в stage_layouts.h
-// (стены уже нарисованные белым остаются белыми).
+// Стейдж 1 — пустое поле. Маски — page-column битовые карты: на AVR копируем
+// байты прямо в кадровый буфер (страница*128+колонка), на хосте — попиксельно.
 void drawStageMap(Arduboy2 &arduboy, uint8_t stage) {
-  const uint8_t* rects;
-  uint16_t rectCount;
-  const uint8_t* fills;
-  uint16_t fillCount;
+  const uint8_t *map;
   switch (stage) {
   case 1:
-    rects = stage2_layout;
-    rectCount = sizeof(stage2_layout) / 4;
-    fills = stage2_fill;
-    fillCount = sizeof(stage2_fill) / 3;
+    map = stage2_map;
     break;
   case 2:
-    rects = stage3_layout;
-    rectCount = sizeof(stage3_layout) / 4;
-    fills = stage3_fill;
-    fillCount = sizeof(stage3_fill) / 3;
+    map = stage3_map;
     break;
   default:
     return;
   }
-  for (uint16_t i = 0; i < rectCount; ++i) {
-    const uint8_t x0 = pgm_read_byte(&rects[i * 4]);
-    const uint8_t y0 = pgm_read_byte(&rects[i * 4 + 1]);
-    const uint8_t width = pgm_read_byte(&rects[i * 4 + 2]) - x0 + 1;
-    const uint8_t height = pgm_read_byte(&rects[i * 4 + 3]) - y0 + 1;
-    arduboy.fillRect(x0, HUD_HEIGHT + y0, width, height, WHITE);
+#if defined(__AVR__)
+  uint8_t *frame = arduboy.getBuffer();
+  for (uint8_t page = 0; page < ARENA_HEIGHT / 8; ++page) {
+    for (uint8_t x = 0; x < ARENA_WIDTH; ++x) {
+      const uint8_t column = pgm_read_byte(&map[page * ARENA_WIDTH + x]);
+      if (column) {
+        frame[page * 128 + x] |= column;
+      }
+    }
   }
-  for (uint16_t i = 0; i < fillCount; ++i) {
-    const uint8_t fx = pgm_read_byte(&fills[i * 3]);
-    const uint8_t fy = pgm_read_byte(&fills[i * 3 + 1]);
-    const uint8_t length = pgm_read_byte(&fills[i * 3 + 2]);
-    arduboy.fillRect(fx, HUD_HEIGHT + fy, length, 1, WHITE);
+#else
+  for (uint8_t y = 0; y < ARENA_HEIGHT; ++y) {
+    for (uint8_t x = 0; x < ARENA_WIDTH; ++x) {
+      const uint8_t byte = pgm_read_byte(&map[(y >> 3) * ARENA_WIDTH + x]);
+      if (byte & (1u << (y & 7))) {
+        arduboy.drawPixel(x, HUD_HEIGHT + y, WHITE);
+      }
+    }
   }
+#endif
 }
 
 // Переносим пиксели через края по отдельности, не затрагивая HUD.

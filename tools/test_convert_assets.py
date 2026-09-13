@@ -10,8 +10,8 @@ from PIL import Image
 
 from convert_assets import (NAMES, RECT_MIN_AREA, STAGE_H, STAGE_SOURCES,
                             STAGE_W, convert, convert_stage, decompose_stage,
-                            lzss_decode_screens, lzss_encode, parse_source,
-                            parse_stage_source, render_layout)
+                            lzss_decode_screens, lzss_encode, page_pack,
+                            parse_source, parse_stage_source, render_layout)
 
 
 class ConversionTests(unittest.TestCase):
@@ -102,6 +102,24 @@ class StageConversionTests(unittest.TestCase):
         self.assertEqual(data[0] & 1, 1)          # (0,0)
         self.assertEqual((data[STAGE_W + 5] >> 2) & 1, 1)  # (5,10): page 1, bit 2
         self.assertEqual(data[STAGE_W + 99] & 0x08, 0x08)  # (99, 11): page 1, bit 3
+
+    def test_page_pack_equals_convert_stage(self):
+        alpha = bytearray(STAGE_W * STAGE_H)
+        for index in (0, 37, 51 * STAGE_W + 7, STAGE_W * STAGE_H - 1):
+            alpha[index] = 255
+        self.write_source(alpha)
+        mask = parse_stage_source(self.path)
+        self.assertEqual(page_pack(mask), convert_stage(self.path))
+
+    def test_page_pack_round_trip(self):
+        rng = random.Random(7)
+        mask = [bool(rng.randrange(2)) for _ in range(STAGE_W * STAGE_H)]
+        data = page_pack(mask)
+        self.assertEqual(len(data), STAGE_W * (STAGE_H // 8))
+        for y in range(STAGE_H):
+            for x in range(STAGE_W):
+                self.assertEqual(bool((data[(y // 8) * STAGE_W + x] >> (y % 8)) & 1),
+                                 mask[y * STAGE_W + x])
 
     def test_rejects_overwide_source(self):
         for name, size in (("wrong size", (STAGE_W + 1, STAGE_H)),
