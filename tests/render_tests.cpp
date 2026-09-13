@@ -257,7 +257,7 @@ int main() {
                 const uint8_t column = pgm_read_byte(&tinyFont[g * 4 + c]);
                 for (uint8_t r = 0; r < 5; ++r) {
                     assert(bool(column & (1u << r)) ==
-                           bool(reference[g][r] & (1u << c)));
+                           bool(reference[g][r] & (0x08u >> c)));
                 }
             }
         }
