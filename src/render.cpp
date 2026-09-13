@@ -641,12 +641,22 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   }
 
   if (game.state == GameState::About) {
-    arduboy.setCursor(40, 12);
-    arduboy.print(F("made for"));
-    arduboy.setCursor(40, 28);
-    arduboy.print(F("school21"));
-    arduboy.setCursor(28, 44);
-    arduboy.print(F("ardujam 2026"));
+    arduboy.setCursor(0, 0);
+    arduboy.print(F("YOU ARE THE"));
+    arduboy.setCursor(0, 8);
+    arduboy.print(F("INDISPENSABLE"));
+    arduboy.setCursor(0, 16);
+    arduboy.print(F("GARBAGE COLLECTOR"));
+    arduboy.setCursor(0, 24);
+    arduboy.print(F("REMOVE USELESS DATA"));
+    arduboy.setCursor(0, 32);
+    arduboy.print(F("MAKE DEV PROUD"));
+    arduboy.setCursor(0, 40);
+    arduboy.print(F("YOU START WITH DASH"));
+    arduboy.setCursor(0, 48);
+    arduboy.print(F("MOVE DPAD A/B SKILLS"));
+    arduboy.setCursor(0, 56);
+    arduboy.print(F("B BACK TO MENU"));
     return;
   }
 

@@ -9,6 +9,7 @@ enum class GameState : uint8_t {
     Intro,
     Menu,
     About,
+    Rules,
     SoundMenu,
     Playing,
     Paused,

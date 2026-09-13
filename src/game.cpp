@@ -364,10 +364,10 @@ void updateGame(Game& game, const InputFrame& input) {
         }
         return;
     }
-    if (game.state == GameState::About) {
-        if (anyMenuButton(input)) game.state = GameState::Menu;
-        return;
-    }
+  if (game.state == GameState::About) {
+    if (input.activateB) game.state = GameState::Menu;
+    return;
+  }
     if (game.state == GameState::SoundMenu) {
         updateSelection(game.soundMenu, input.moveY, SOUND_MENU_ITEM_COUNT);
         if (input.activateB) {
