@@ -1,4 +1,5 @@
 <img width="1400" height="843" alt="IMG_0425" src="https://github.com/user-attachments/assets/1b3adb23-ec3b-4b46-b179-3129a350df44" />
+
 # 🗑️ Garbage Collector
 
 > *🇬🇧 [English version](README.en.md)*
