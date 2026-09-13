@@ -136,6 +136,22 @@ void testTimerAndWaves() {
             assert(alive(game.combat) == 0);
             updateGame(game, idle);
         }
+        if (stage == BOSS_STAGE) {
+            // Босс-стейдж: волн в данных нет, раунд закрывает смерть босса.
+            assert(getStageWaveCount(stage) == 0);
+            parkAwayFromMarkers(game);
+            assert(!playerBlocked(game.combat.currentStage, game.player.x, game.player.y));
+            for (unsigned i = 0; i < SPAWN_DELAY_FRAMES - 1; ++i) {
+                updateGame(game, idle); // предупреждение: босс ещё не вышел
+                assert(game.combat.boss.hp == 0 && alive(game.combat) == 0);
+            }
+            updateGame(game, idle); // последний кадр: босс появляется
+            assert(game.combat.boss.hp == BOSS_MAX_HP);
+            for (uint8_t i = 0; i < BOSS_MAX_HP; ++i) damageBoss(game.combat, 1);
+            assert(game.combat.boss.hp == 0 && game.combat.stageCleared);
+            updateGame(game, idle);
+            assert(game.state == GameState::Win);
+        }
         if (stage + 1 < TOTAL_STAGES) {
             assert(game.state == GameState::StageCleared);
             updateGame(game, pressA);
@@ -620,11 +636,178 @@ const InputFrame input = {int8_t(int(rng % 3) - 1), int8_t(int((rng >> 8) % 3) -
         assert(game.player.hp <= game.player.maxHp && game.player.maxHp <= 6);
         if (game.state == GameState::Playing) {
             assert(!playerBlocked(game.combat.currentStage, game.player.x, game.player.y));
-            assertSeparated(game);
+            // Босс идёт по орбите свободно и не отступает от игрока; застрявший
+            // под боссом игрок может быть накрыт контактом — это легальный бой.
+            if (game.combat.currentStage != BOSS_STAGE) assertSeparated(game);
         }
     }
     assert(deaths > 0);
     std::printf("Live combat stress: 20000 frames, %u death/restart flows\n", deaths);
+}
+
+// Финальный босс: круговое движение шагами, прислужники выходят с боков,
+// ранят только пули автострельбы, контакт с боссом ранит и блокирует ход.
+void testBoss() {
+    Game game = fixture();
+    game.combat.currentStage = BOSS_STAGE;
+    resetBossStage(game.combat);
+    assert(game.combat.spawnTimer == SPAWN_DELAY_FRAMES);
+    assert(game.combat.boss.hp == 0);
+
+    // Предупреждение: босс и волны из данных не выходят, автострельба молчит.
+    for (unsigned i = 0; i < SPAWN_DELAY_FRAMES - 1; ++i) {
+        updateCombat(game.combat, game.player.x, game.player.y);
+        assert(game.combat.boss.hp == 0 && alive(game.combat) == 0);
+    }
+    updateCombat(game.combat, game.player.x, game.player.y);
+    assert(game.combat.boss.hp == BOSS_MAX_HP);
+    uint8_t px, py;
+    getBossSpawnPixel(px, py);
+    assert(game.combat.boss.x == px * FIXED_ONE && game.combat.boss.y == py * FIXED_ONE);
+
+    // Полный цикл квадрата из фиксированных шагов возвращает босса в исходную
+    // точку, и каждая позиция целиком лежит внутри арены и вне стен. Патруль не
+    // должен пересекать пиксельный квадрат спавна игрока (45,30, размер 7).
+    const int16_t startX = game.combat.boss.x, startY = game.combat.boss.y;
+    for (uint8_t tick = 0; tick < BOSS_PATROL_LEG_LEN * 4; ++tick) {
+        for (uint8_t i = 0; i < BOSS_STEP_INTERVAL_FRAMES; ++i) {
+            updateBoss(game.combat, game.player.x, game.player.y);
+            assert(enemyPositionValid(BOSS_STAGE, game.combat.boss.x, game.combat.boss.y));
+        }
+        const int16_t bossX = game.combat.boss.x / FIXED_ONE;
+        const int16_t bossY = game.combat.boss.y / FIXED_ONE;
+        assert(bossX - BOSS_HALF_WIDTH >= PLAYER_START_X + PLAYER_SIZE ||
+               bossX + BOSS_HALF_WIDTH <= PLAYER_START_X ||
+               bossY - BOSS_HALF_HEIGHT >= PLAYER_START_Y + PLAYER_SIZE ||
+               bossY + BOSS_HALF_HEIGHT <= PLAYER_START_Y);
+    }
+    assert(game.combat.boss.phase == 0);
+    assert(game.combat.boss.x == startX && game.combat.boss.y == startY);
+
+    // Первая волна прислужников — слабые Basic с локоном HP 2.
+    {
+        Game waveGame = fixture();
+        waveGame.combat.currentStage = BOSS_STAGE;
+        resetBossStage(waveGame.combat);
+        for (unsigned i = 0; i < SPAWN_DELAY_FRAMES; ++i)
+            updateCombat(waveGame.combat, waveGame.player.x, waveGame.player.y);
+        assert(alive(waveGame.combat) == 0);
+        for (unsigned i = 0; i < BOSS_FIRST_WAVE_DELAY_FRAMES; ++i)
+            updateBoss(waveGame.combat, waveGame.player.x, waveGame.player.y);
+        assert(alive(waveGame.combat) >= 1);
+        for (const Enemy& e : waveGame.combat.enemies) {
+            if (getEnemyType(e) == EnemyType::None) continue;
+            assert(getEnemyType(e) == EnemyType::Basic);
+            assert(getEnemyHp(e) == 2); // вариант 0: слабый моб
+            assert(enemyPositionValid(BOSS_STAGE, e.x, e.y));
+        }
+    }
+
+    // Фаза пробуждения: босс виден (hp>0), но пули проходят сквозь и
+    // автострельба в него не целится, пока spawnTimer не обнулился.
+    {
+        Game graceFixture = fixture();
+        graceFixture.combat.currentStage = BOSS_STAGE;
+        resetBossStage(graceFixture.combat);
+        for (unsigned i = 0; i < SPAWN_DELAY_FRAMES; ++i)
+            updateCombat(graceFixture.combat, graceFixture.player.x,
+                         graceFixture.player.y);
+        assert(graceFixture.combat.boss.hp == BOSS_MAX_HP);
+        assert(graceFixture.combat.spawnTimer == BOSS_AWAKE_FRAMES);
+        // Пуля, влетевшая в босса во время пробуждения, не ранит его.
+        graceFixture.combat.projectiles[0] = {
+            78 * FIXED_ONE, 32 * FIXED_ONE, PROJECTILE_SPEED, 0, 1};
+        updateCombat(graceFixture.combat, graceFixture.player.x,
+                     graceFixture.player.y);
+        assert(graceFixture.combat.boss.hp == BOSS_MAX_HP);
+        // Автострельба с принудительным кулдауном в босса не стреляет.
+        for (unsigned i = 0; i < BOSS_AWAKE_FRAMES; ++i) {
+            for (uint8_t p = 0; p < MAX_PROJECTILES; ++p)
+                graceFixture.combat.projectiles[p].framesLeft = 0;
+            graceFixture.combat.shotCooldown = 0;
+            graceFixture.combat.burstShots = 0;
+            updateCombat(graceFixture.combat, graceFixture.player.x,
+                         graceFixture.player.y);
+            assert(graceFixture.combat.boss.hp == BOSS_MAX_HP);
+        }
+        assert(graceFixture.combat.spawnTimer == 0);
+        // После пробуждения та же пуля ранит босса.
+        for (uint8_t p = 0; p < MAX_PROJECTILES; ++p)
+            graceFixture.combat.projectiles[p].framesLeft = 0;
+        graceFixture.combat.projectiles[0] = {
+            78 * FIXED_ONE, 32 * FIXED_ONE, PROJECTILE_SPEED, 0, 1};
+        graceFixture.combat.shotCooldown = 1; // без новых выстрелов
+        updateCombat(graceFixture.combat, graceFixture.player.x,
+                     graceFixture.player.y);
+        assert(graceFixture.combat.boss.hp == BOSS_MAX_HP - 1);
+    }
+
+    // Пуля, влетевшая в босса, ранит его, а не пролетает сквозь — при этом
+    // контакт игрока сам по себе босса не убивает (spawnTimer=0: босс боевой).
+    {
+        Game combatFixture = fixture();
+        combatFixture.combat.currentStage = BOSS_STAGE;
+        resetBossStage(combatFixture.combat);
+        combatFixture.player.x = 20 * FIXED_ONE; // вне радиуса автострельбы
+        combatFixture.player.y = 20 * FIXED_ONE;
+        combatFixture.combat.boss.hp = BOSS_MAX_HP;
+        combatFixture.combat.boss.x = 79 * FIXED_ONE;
+        combatFixture.combat.boss.y = 32 * FIXED_ONE;
+        combatFixture.combat.spawnTimer = 0;
+        combatFixture.combat.projectiles[0] = {78 * FIXED_ONE, 32 * FIXED_ONE,
+                                               PROJECTILE_SPEED, 0, 1};
+        updateCombat(combatFixture.combat, combatFixture.player.x, combatFixture.player.y);
+        assert(combatFixture.combat.boss.hp == BOSS_MAX_HP - 1);
+        assert(checkPlayerEnemyCollisions(combatFixture.combat, 79 * FIXED_ONE, 32 * FIXED_ONE));
+        assert(combatFixture.combat.boss.hp == BOSS_MAX_HP - 1); // контакт не бьёт босса
+    }
+
+    // Автострельба целится в босса и убивает его; смерть закрывает стейдж.
+    // Игрок в 5px от стартовой точки — босс всегда в радиусе стрельбы.
+    game = fixture();
+    game.combat.currentStage = BOSS_STAGE;
+    resetBossStage(game.combat);
+    game.player.x = 51 * FIXED_ONE;
+    game.player.y = 32 * FIXED_ONE;
+    assert(!playerBlocked(BOSS_STAGE, game.player.x, game.player.y));
+    for (unsigned i = 0; i < SPAWN_DELAY_FRAMES; ++i)
+        updateCombat(game.combat, game.player.x, game.player.y);
+    assert(game.combat.boss.hp == BOSS_MAX_HP);
+    unsigned frames = 0;
+    for (; game.combat.boss.hp > 0 && frames < 600; ++frames) {
+        game.combat.shotCooldown = 0; // непрерывная очередь на босса
+        updateCombat(game.combat, game.player.x, game.player.y);
+    }
+    assert(frames < 600); // босс умирает задолго до лимита
+    assert(game.combat.boss.hp == 0);
+    assert(game.combat.stageCleared);
+    assert(game.combat.playerScore >= BOSS_SCORE); // плюс бонус времени за клир
+
+    // Контакт с боссом ранит и блокирует движение, как с обычным врагом.
+    game = fixture();
+    game.combat.currentStage = BOSS_STAGE;
+    resetBossStage(game.combat);
+    game.combat.boss.hp = BOSS_MAX_HP;
+    game.combat.boss.x = game.player.x + HALF_PLAYER;
+    game.combat.boss.y = game.player.y + HALF_PLAYER;
+    game.combat.spawnTimer = 0; // боевое состояние, без фазы пробуждения
+    game.combat.shotCooldown = 2;      // без автострельбы в этом фрагменте
+    game.combat.burstShots = 0;
+    const int16_t stuckX = game.player.x, stuckY = game.player.y;
+    for (unsigned i = 0; i < 8; ++i)
+        updateGame(game, {1, 0, false, false, false, false});
+    assert(game.player.x == stuckX && game.player.y == stuckY); // движение заблокировано
+    assert(game.player.hp <= 3);                                // первый контакт ранит
+    assert(game.state == GameState::Playing);
+
+    // Возврат после смерти: resetBossStage выключает босса и чистит пулы.
+    game.combat.boss.hp = BOSS_MAX_HP;
+    game.combat.stageCleared = 0;
+    for (uint8_t i = 0; i < BOSS_MAX_HP; ++i) damageBoss(game.combat, 1);
+    assert(game.combat.boss.hp == 0 && game.combat.stageCleared);
+    resetBossStage(game.combat);
+    assert(game.combat.boss.hp == 0 && alive(game.combat) == 0);
+    assert(game.combat.spawnTimer == SPAWN_DELAY_FRAMES);
 }
 } // namespace
 
@@ -636,6 +819,7 @@ int main() {
     testAbilitiesAndCombat();
     testBurstFire();
     testGeometry();
+    testBoss();
     testLiveCombatStress();
     std::puts("Combat regressions passed: waves, timer, shop, health, abilities, pools, 50000 geometry rays.");
 }

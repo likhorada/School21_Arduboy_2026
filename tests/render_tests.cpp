@@ -312,4 +312,71 @@ int main() {
         }
     }
     std::puts("Render regressions passed: screen bounds, menu text, hearts, score, cooldowns, arena isolation, sprites, menu screens, fonts.");
+    // Босс-стейдж: мигающий контур в точке появления, ровно 1 из 2 кадров.
+    {
+        game.state = GameState::Playing;
+        game.combat = {};
+        game.combat.currentStage = BOSS_STAGE;
+        game.combat.spawnTimer = 1;
+        game.player.x = 20 * FIXED_ONE; // далеко от контура (66..80, 24..40)
+        game.player.y = 20 * FIXED_ONE;
+        game.player.iframes = 0;
+        renderGame(display, game);
+        uint8_t px, py;
+        getBossSpawnPixel(px, py);
+        const int16_t left = px - BOSS_VIS_W / 2, top = py - BOSS_VIS_H / 2;
+        assert(display.pixels[top][left] == WHITE);
+        assert(display.pixels[top + BOSS_VIS_H - 1][left] == WHITE);
+        assert(display.pixels[top][left + BOSS_VIS_W - 1] == WHITE);
+        assert(display.pixels[top + BOSS_VIS_H - 1][left + BOSS_VIS_W - 1] == WHITE);
+        assert(display.pixels[py][left] == WHITE);
+        assert(display.pixels[py][left + BOSS_VIS_W - 1] == WHITE);
+        assert(display.pixels[py][px] == BLACK); // внутренность пустая
+        game.combat.spawnTimer = 2;
+        renderGame(display, game);
+        assert(display.pixels[top][left] == BLACK); // чётный кадр: мигание
+        assert(display.pixels[py][px] == BLACK);
+    }
+    // Спрайт босса: 9 глифов "LOV / I E / YOU" ровно из bossFont, центрированы.
+    {
+        game.state = GameState::Playing;
+        game.combat = {};
+        game.combat.currentStage = BOSS_STAGE;
+        game.combat.spawnTimer = 0;
+        game.combat.boss.hp = BOSS_MAX_HP;
+        game.combat.boss.x = 70 * FIXED_ONE;
+        game.combat.boss.y = 32 * FIXED_ONE;
+        game.player.x = 20 * FIXED_ONE; // в стороне от холста (63..76, 24..40)
+        game.player.y = 20 * FIXED_ONE;
+        game.player.iframes = 0;
+        renderGame(display, game);
+        const int16_t startX = 70 - BOSS_VIS_W / 2, startY = 32 - BOSS_VIS_H / 2;
+        const char letters[] = "LOVI EYOU";
+        const auto glyphIndex = [](char c) -> uint8_t {
+            switch (c) {
+            case 'L': return 0;
+            case 'O': return 1;
+            case 'V': return 2;
+            case 'I': return 3;
+            case 'E': return 4;
+            case 'Y': return 5;
+            case 'U': return 6;
+            default: return 255;
+            }
+        };
+        for (uint8_t row = 0; row < BOSS_TEXT_COLS; ++row) {
+            for (uint8_t col = 0; col < BOSS_TEXT_COLS; ++col) {
+                const char c = letters[row * 3 + col];
+                const uint8_t glyph = glyphIndex(c);
+                if (glyph == 255) continue;
+                for (uint8_t cc = 0; cc < 4; ++cc) {
+                    const uint8_t column = pgm_read_byte(&bossFont[glyph * 4 + cc]);
+                    for (uint8_t rr = 0; rr < 5; ++rr)
+                        assert(display.pixels[startY + row * BOSS_ROW_PITCH + rr]
+                                             [startX + col * BOSS_COL_PITCH + cc] ==
+                               (column & (1u << rr) ? WHITE : BLACK));
+                }
+            }
+        }
+    }
 }

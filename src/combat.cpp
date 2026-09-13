@@ -74,6 +74,35 @@ int8_t findHit(const Combat &combat, int16_t x, int16_t y, int16_t dx,
     if (segmentHitsBox(x, y, dx, dy, box))
       return i;
   }
+  // Босс — крупная цель для пуль только на своём стейдже, пока жив и проснулся
+  // (способности босса не трогают). Во время предупреждения/пробуждения
+  // (spawnTimer>0) пули проходят сквозь него. Хитбокс 14x16 с маржой полосы.
+  if (combat.currentStage == BOSS_STAGE && combat.boss.hp > 0 &&
+      combat.spawnTimer == 0) {
+    const Boss &boss = combat.boss;
+    const int16_t sx =
+        shortestDelta(x, wrapCoordinate(boss.x, ARENA_WIDTH_FIXED),
+                      ARENA_WIDTH_FIXED);
+    const int16_t sy =
+        shortestDelta(y, wrapCoordinate(boss.y, ARENA_HEIGHT_FIXED),
+                      ARENA_HEIGHT_FIXED);
+    const int16_t bossSpanX =
+        (dx < 0 ? -dx : dx) + BOSS_HALF_WIDTH * FIXED_ONE;
+    const int16_t bossSpanY =
+        (dy < 0 ? -dy : dy) + BOSS_HALF_HEIGHT * FIXED_ONE;
+    if (sx <= bossSpanX && sx >= -bossSpanX && sy <= bossSpanY &&
+        sy >= -bossSpanY) {
+      const Obstacle box = {
+          uint8_t(wrapCoordinate(boss.x / FIXED_ONE - BOSS_HALF_WIDTH,
+                                 ARENA_WIDTH)),
+          uint8_t(wrapCoordinate(boss.y / FIXED_ONE - BOSS_HALF_HEIGHT,
+                                 ARENA_HEIGHT)),
+          2 * BOSS_HALF_WIDTH, 2 * BOSS_HALF_HEIGHT};
+      if (segmentHitsBox(x, y, dx, dy, box)) {
+        return BOSS_HIT;
+      }
+    }
+  }
   return NO_HIT;
 }
 
@@ -124,14 +153,21 @@ void resetCombat(Combat &combat) {
 // Read-only contact query; health and invulnerability belong to the player.
 bool checkPlayerEnemyCollisions(const Combat &combat, int16_t playerX,
                                 int16_t playerY, bool touching) {
+  // Player coordinates are top-left; entities store centers.
+  const int16_t playerCenterX = playerX + (PLAYER_SIZE * FIXED_ONE) / 2;
+  const int16_t playerCenterY = playerY + (PLAYER_SIZE * FIXED_ONE) / 2;
+  // Босс стоит на кругу независимо от игрока, поэтому проверяем его раньше
+  // врагов: контакт босса ранит и блокирует движение, как контакт врагов.
+  const Boss &boss = combat.boss;
+  if (boss.hp > 0 &&
+      bossOverlapsPlayer(boss, playerCenterX, playerCenterY, touching)) {
+    return true;
+  }
   for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
     const Enemy &enemy = combat.enemies[i];
     if (getEnemyType(enemy) == EnemyType::None) {
       continue;
     }
-    // Player coordinates are top-left; enemies store centers.
-    const int16_t playerCenterX = playerX + (PLAYER_SIZE * FIXED_ONE) / 2;
-    const int16_t playerCenterY = playerY + (PLAYER_SIZE * FIXED_ONE) / 2;
     if (enemyOverlapsPlayer(enemy.x, enemy.y, playerCenterX, playerCenterY,
                             touching)) {
       return true;
@@ -167,8 +203,20 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
                   combat.currentStage);
   }
 
-  // Новые враги первый кадр остаются точно на индикаторах.
-  if (combat.spawnTimer > 0 && --combat.spawnTimer == 0) {
+  // Новые враги первый кадр остаются точно на индикаторах. На босс-стейдже
+  // волн из данных нет: предупреждение (hp==0) выпускает самого босса, дальше
+  // его колбасит updateBoss (движение + волны прислужников). После активации
+  // spawnTimer — фаза пробуждения: босс виден, но неуязвим и не цель.
+  if (combat.currentStage == BOSS_STAGE) {
+    if (combat.spawnTimer > 0) {
+      if (--combat.spawnTimer == 0 && combat.boss.hp == 0) {
+        activateBoss(combat); // конец предупреждения (не фазы пробуждения)
+      }
+    }
+    if (combat.boss.hp > 0) {
+      updateBoss(combat, originX, originY);
+    }
+  } else if (combat.spawnTimer > 0 && --combat.spawnTimer == 0) {
     spawnCurrentWave(combat, originX, originY);
   }
 
@@ -180,7 +228,9 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
       continue;
     }
     const int8_t hit = advanceProjectile(projectile, combat);
-    if (hit >= 0) {
+    if (hit == BOSS_HIT) {
+      damageBoss(combat, damage);
+    } else if (hit >= 0) {
       damageEnemy(combat, hit, damage);
     }
   }
@@ -239,6 +289,29 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
                      candidateY)) {
       bestDistanceSquared = distanceSquared;
       bestTarget = i;
+      bestDx = candidateX;
+      bestDy = candidateY;
+    }
+  }
+
+  // Босс — крупная цель для автострельбы на своём стейдже; при равном удалении
+  // его перекрывают враги (проверяется последним — лучший кандидат остаётся).
+  // В фазе пробуждения (spawnTimer>0) в босса не целится.
+  if (combat.boss.hp > 0 && combat.spawnTimer == 0) {
+    const int16_t targetX = wrapCoordinate(combat.boss.x, ARENA_WIDTH_FIXED);
+    const int16_t targetY = wrapCoordinate(combat.boss.y, ARENA_HEIGHT_FIXED);
+    const int16_t candidateX =
+        shortestDelta(originX, targetX, ARENA_WIDTH_FIXED);
+    const int16_t candidateY =
+        shortestDelta(originY, targetY, ARENA_HEIGHT_FIXED);
+    const uint32_t distanceSquared =
+        static_cast<int32_t>(candidateX) * candidateX +
+        static_cast<int32_t>(candidateY) * candidateY;
+    if (distanceSquared < bestDistanceSquared &&
+        !shotBlocked(combat.currentStage, originX, originY, candidateX,
+                     candidateY)) {
+      bestDistanceSquared = distanceSquared;
+      bestTarget = BOSS_HIT;
       bestDx = candidateX;
       bestDy = candidateY;
     }
@@ -341,9 +414,37 @@ void getSpawnPixel(uint8_t stage, uint8_t wave, uint8_t index, uint8_t &x,
   y = ARENA_HEIGHT / 2;
 }
 
+// Общий выход со стейджа (последняя волна / смерть босса): баним дропы очков,
+// чистим пули и прислужников, начисляем бонус за оставшееся время. Индекс и
+// счётчик стейджа остаются для экрана результатов; магазин двигает индекс.
+void finishStage(Combat &combat) {
+  // Bank remaining drops before leaving; no rewards disappear in the shop.
+  for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
+    if (combat.scoreOrbs[i].lifetime)
+      combat.playerScore += combat.scoreOrbs[i].value;
+    combat.scoreOrbs[i].lifetime = 0;
+  }
+  for (uint8_t i = 0; i < MAX_PROJECTILES; ++i)
+    combat.projectiles[i].framesLeft = 0;
+  for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
+    setEnemyType(combat.enemies[i], EnemyType::None);
+  // Стейдж завершён: бонус за оставшееся время
+  const uint16_t timeBonus =
+      remainingSeconds(combat.stageTimer) * STAGE_TIME_BONUS_MULT;
+  combat.playerScore += timeBonus;
+
+  // Keep this stage's index/timer for its results. Shop advances the index.
+  combat.stageCleared = true;
+  combat.spawnTimer = 0;
+}
+
 // Проверка завершения волны и переход к следующей
 void checkWaveCompletion(Combat &combat) {
   if (combat.spawnTimer > 0 || combat.stageCleared)
+    return;
+  // Босс-стейдж живёт по своим правилам: волн из данных нет, закрытие — только
+  // смерть босса (damageBoss -> finishStage), поэтому здесь ничего не делаем.
+  if (combat.currentStage == BOSS_STAGE)
     return;
   // Проверяем, есть ли живые враги
   bool anyAlive = false;
@@ -367,28 +468,27 @@ void checkWaveCompletion(Combat &combat) {
     const uint8_t totalWaves = getStageWaveCount(combat.currentStage);
 
     if (combat.currentWave >= totalWaves) {
-      // Bank remaining drops before leaving; no rewards disappear in the shop.
-      for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
-        if (combat.scoreOrbs[i].lifetime)
-          combat.playerScore += combat.scoreOrbs[i].value;
-        combat.scoreOrbs[i].lifetime = 0;
-      }
-      for (uint8_t i = 0; i < MAX_PROJECTILES; ++i)
-        combat.projectiles[i].framesLeft = 0;
-      // Стейдж завершён: бонус за оставшееся время
-      const uint16_t timeBonus =
-          remainingSeconds(combat.stageTimer) * STAGE_TIME_BONUS_MULT;
-      combat.playerScore += timeBonus;
-
-      // Keep this stage's index/timer for its results. Shop advances the index.
-      combat.stageCleared = true;
-      combat.spawnTimer = 0;
+      finishStage(combat);
       return;
     }
 
     // Задержка перед спавном следующей волны (показываем индикаторы)
     combat.spawnTimer = SPAWN_DELAY_FRAMES;
   }
+}
+
+void damageBoss(Combat &combat, uint8_t damage) {
+  Boss &boss = combat.boss;
+  if (!boss.hp || damage == 0)
+    return;
+  if (boss.hp > damage) {
+    boss.hp = static_cast<uint8_t>(boss.hp - damage);
+    return;
+  }
+  boss.hp = 0; // hp==0 = босс мёртв (и неактивен)
+  combat.playerScore += BOSS_SCORE;
+  combat.audioEvents |= AUDIO_EVENT_ENEMY_DEATH;
+  finishStage(combat);
 }
 
 void damageEnemy(Combat &combat, uint8_t index, uint8_t damage) {

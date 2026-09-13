@@ -12,6 +12,23 @@ enum class EnemyType : uint8_t {
   Fast,     // 0f - быстрый, HP влияет на скорость
 };
 
+struct Combat;
+
+// Босс третьего стейджа: квадрат-надпись "LOV / I E / YOU". x/y — центр в 1/16
+// пикселя. Почти стоит: медленно ходит по квадрату 4x4 вокруг якоря (phase),
+// раз в waveTimer испускает волну прислужников. Ранят его только пули
+// автострельбы; контакт с игроком ранит игрока. Босс на арене, когда hp>0;
+// спавн-предупреждение и 'мёртвое' состояние имеют hp==0.
+struct Boss {
+  int16_t x;         // Центр (1/16 пикселя)
+  int16_t y;
+  uint16_t waveTimer; // Кадры до следующей волны прислужников
+  uint8_t hp;         // Оставшиеся попадания (0 — неактивен/мёртв)
+  uint8_t phase;      // Тик патруля (0..4*BOSS_PATROL_LEG_LEN-1)
+};
+
+static_assert(sizeof(Boss) == 8, "Boss must be 8 bytes");
+
 // Упрощённый враг с минимальной памятью
 struct Enemy {
   int16_t x; // Субпиксели (1/16 пикселя)
@@ -96,6 +113,22 @@ void createScoreOrb(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t x, int16_t y,
 
 uint8_t collectOrbs(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t playerX,
                     int16_t playerY);
+
+// === БОСС ===
+// Сброс боевого состояния перед босс-стейджем: активный босс, предупреждение о
+// появлении (spawnTimer = SPAWN_DELAY_FRAMES), прислужники и пули очищены.
+void resetBossStage(Combat& combat);
+// Активация босса по истечении предупреждения (ставит позицию кадра 0).
+void activateBoss(Combat& combat);
+// Ежекадровое обновление босса: движение по кругу и волны прислужников.
+// playerX/playerY — центр игрока (1/16 пикселя).
+void updateBoss(Combat& combat, int16_t playerX, int16_t playerY);
+// Детерминированная точка появления босса для мигающего индикатора.
+void getBossSpawnPixel(uint8_t& x, uint8_t& y);
+// Пересечение хитбокса босса 14x16 с игроком (центры; touching добавляет шаг
+// контакта как у врагов).
+bool bossOverlapsPlayer(const Boss& boss, int16_t playerCenterX,
+                        int16_t playerCenterY, bool touching = false);
 
 static_assert(sizeof(Enemy) == 6, "Enemy must be 6 bytes");
 static_assert(sizeof(ScoreOrb) == 6, "ScoreOrb must be 6 bytes");

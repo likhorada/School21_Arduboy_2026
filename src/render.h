@@ -20,4 +20,15 @@ void renderPlayerFrame(uint8_t* frame, const Player& player);
 // Доступен тестам, чтобы сверять перенос [строка][колонка] с эталоном.
 extern const uint8_t tinyFont[] PROGMEM;
 
+// Шрифт босса: 7 глифов 4x5 (L,O,V,I,E,Y,U) в том же формате, что tinyFont.
+// Эталонная раскладка даёт надпись-квадрат "LOV / I E / YOU". Доступен тестам.
+extern const uint8_t bossFont[] PROGMEM;
+
+// Геометрия холста босса: 3 строки по 3 глифа 4x5, шаги 5 по X и 6 по Y.
+constexpr uint8_t BOSS_TEXT_COLS = 3;
+constexpr uint8_t BOSS_COL_PITCH = 5;
+constexpr uint8_t BOSS_ROW_PITCH = 6;
+constexpr uint8_t BOSS_VIS_W = BOSS_COL_PITCH * 3 - 1; // 14
+constexpr uint8_t BOSS_VIS_H = BOSS_ROW_PITCH * 3 - 1; // 17
+
 } // пространство имён gc

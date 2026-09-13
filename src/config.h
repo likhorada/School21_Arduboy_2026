@@ -69,6 +69,42 @@ static_assert(SHOT_BURST_COUNT >= 1 && SHOT_BURST_DELAY > 0 &&
                   SHOT_BURST_DELAY < SHOT_INTERVAL,
               "Burst bullets must be quicker than the full reload");
 
+// === БОСС ТРЕТЬЕГО СТЕЙДЖА ===
+// Стейдж 3 (индекс 2) вместо волн врагов ведёт босс-«квадрат» LOV / I E / YOU.
+// Босс ходит по кругу, раз в BOSS_WAVE_INTERVAL_FRAMES испускает по одному
+// слабому мобу с каждой стороны и умирает от BOSS_MAX_HP попаданий автострельбы
+// (способности и контакт с игроком его не ранят). Все значения — ручки баланса.
+constexpr uint8_t BOSS_STAGE = 2;          // Индекс стейджа-босса
+constexpr uint8_t BOSS_MAX_HP = 100;        // Попаданий, чтобы убить босса
+constexpr uint8_t BOSS_SCORE = 100;        // Очки за уничтожение босса
+constexpr uint8_t BOSS_MINION_COUNT = 4;   // Прислужников за волну (с каждой стороны)
+// Волна прислужников каждые ~10 с (632 кадра при ~62,5 кадра/с);
+// первая — через ~1 с (64 кадра) после появления босса. Оба числа кратны
+// BOSS_STEP_INTERVAL_FRAMES, чтобы шаги патруля были равномерными.
+constexpr uint16_t BOSS_WAVE_INTERVAL_FRAMES = 632;
+constexpr uint8_t BOSS_FIRST_WAVE_DELAY_FRAMES = 64;
+// Фаза пробуждения после появления: босс ~1,4 c неуязвим (пули проходят
+// сквозь, автострельба не целится), первая волна прислужников (64-й кадр)
+// выходит как раз в защитной фазе. Дольше минимум на > BOSS_FIRST_WAVE_DELAY,
+// чтобы игрок сначала разобрался с прислужниками.
+constexpr uint8_t BOSS_AWAKE_FRAMES = 88;
+// Движение босса — маленький медленный квадрат: 4px вправо, 4px вниз, 4px
+// влево, 4px вверх вокруг якоря, возврат в исходную точку. Шаг 1px каждые
+// BOSS_STEP_INTERVAL_FRAMES кадров — весь цикл (16px) за ~2,1 c.
+constexpr uint8_t BOSS_STEP_INTERVAL_FRAMES = 8;
+constexpr uint8_t BOSS_PATROL_LEG_LEN = 4; // Длина стороны квадрата (px)
+// Якорь на «центра-право»: в 24,6px от спавна игрока (45,30) и вдали от стен
+// (правый край бокса при патруле ≤84, стены stage3 начинаются с x=88).
+constexpr uint8_t BOSS_PATROL_ANCHOR_X = 73;
+constexpr uint8_t BOSS_PATROL_ANCHOR_Y = 32;
+// Визуальный квадрат 14x17 рисуется глифами 4x5 (шаг 5 по X, 6 по Y);
+// хитбокс — 14x16 (половины 7 и 8).
+constexpr uint8_t BOSS_HALF_WIDTH = 7;
+constexpr uint8_t BOSS_HALF_HEIGHT = 8;
+static_assert(BOSS_MAX_HP > 0 && BOSS_MINION_COUNT <= 4 &&
+                  BOSS_PATROL_LEG_LEN >= 1 && BOSS_PATROL_LEG_LEN <= 63,
+              "Patrol cycle must fit in a byte phase");
+
 // === ИГРОВЫЕ КОНСТАНТЫ ===
 // HP и неуязвимость
 constexpr uint8_t PLAYER_BASE_MAX_HP = 4;

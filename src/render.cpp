@@ -169,10 +169,10 @@ uint8_t tinyFontIndex(char c) {
   return 17; // 'd'
 }
 
-// Глиф врага обрезается краем арены, не переносится на другую сторону.
-// На AVR рисуем колонку-байтом в кадровый буфер, на хосте — пикселями.
-void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
-  const uint8_t *data = &tinyFont[tinyFontIndex(c) * 4];
+// Глиф 4x5 column-major из произвольного шрифта обрезается краем арены, не
+// переносится на другую сторону. На AVR рисуем колонку-байтом в кадровый буфер,
+// на хосте — пикселями.
+void drawGlyphAt(Arduboy2 &arduboy, const uint8_t *data, int16_t x, int16_t y) {
 #if defined(__AVR__)
   uint8_t *frame = arduboy.getBuffer();
   for (uint8_t col = 0; col < 4; ++col) {
@@ -190,6 +190,57 @@ void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
     }
   }
 #endif
+}
+
+void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
+  drawGlyphAt(arduboy, &tinyFont[tinyFontIndex(c) * 4], x, y);
+}
+
+// Круглая рамка по центру центра (centerX, centerY в пикселях арены) для
+// мигающего индикатора появления босса.
+void drawArenaRectBorder(Arduboy2 &arduboy, int16_t centerX, int16_t centerY,
+                         uint8_t width, uint8_t height) {
+  const int16_t left = centerX - width / 2;
+  const int16_t top = centerY - height / 2;
+  const int16_t right = left + width - 1;
+  const int16_t bottom = top + height - 1;
+  for (int16_t x = left; x <= right; ++x) {
+    drawArenaPixel(arduboy, x, top, WHITE);
+    drawArenaPixel(arduboy, x, bottom, WHITE);
+  }
+  for (int16_t y = top; y <= bottom; ++y) {
+    drawArenaPixel(arduboy, left, y, WHITE);
+    drawArenaPixel(arduboy, right, y, WHITE);
+  }
+}
+
+// Холст босса: 3 строки по 3 глифа 4x5. Сетка глифов вместо букв (L0 O1 V2 /
+// I3 _4 E5 / Y6 O1 U7): номер = слово в bossFont, 255 — пробел. Геометрию
+// (шаги 5x6, холст 14x17) тесты берут из render.h.
+const uint8_t bossGrid[] PROGMEM = {0, 1, 2, 3, 255, 4, 5, 1, 6};
+static_assert(sizeof(bossGrid) == BOSS_TEXT_COLS * BOSS_TEXT_COLS,
+              "Boss grid is 3x3 glyph slots");
+
+// Квадрат-надпись босса "LOV / I E / YOU": 3 строки по 3 глифа 4x5 (шаг 5 по X,
+// 6 по Y) = холст 14x17, центрированный по центру босса. Хитбокс (7x8) чуть
+// ниже холста, как и визуально нарисованы буквы.
+void drawBoss(Arduboy2 &arduboy, const Boss &boss) {
+  if (!boss.hp) {
+    return;
+  }
+  const int16_t startX = boss.x / FIXED_ONE - BOSS_VIS_W / 2;
+  const int16_t startY = boss.y / FIXED_ONE - BOSS_VIS_H / 2;
+  for (uint8_t row = 0; row < BOSS_TEXT_COLS; ++row) {
+    for (uint8_t col = 0; col < BOSS_TEXT_COLS; ++col) {
+      const uint8_t glyph =
+          pgm_read_byte(&bossGrid[row * BOSS_TEXT_COLS + col]);
+      if (glyph == 255) {
+        continue; // пробел средней строки
+      }
+      drawGlyphAt(arduboy, &bossFont[glyph * 4],
+                  startX + col * BOSS_COL_PITCH, startY + row * BOSS_ROW_PITCH);
+    }
+  }
 }
 
 // Рисуем врага: компактная строка, например "d10", "x2", "F15"
@@ -260,6 +311,19 @@ void drawScoreOrb(Arduboy2 &arduboy, const ScoreOrb &orb) {
 // Рисуем предупреждающие квадраты перед спавном волны
 void drawSpawnIndicators(Arduboy2 &arduboy, const Combat &combat) {
   if (combat.spawnTimer == 0) {
+    return;
+  }
+
+  // Босс-стейдж: волн из данных нет — мигает рамка в точке появления босса,
+  // но только в фазе предупреждения (hp==0). Во время пробуждения (spawnTimer>0
+  // при hp>0) босс уже виден, рамка сверху не нужна.
+  if (combat.currentStage == BOSS_STAGE) {
+    if (combat.boss.hp == 0 && (combat.spawnTimer & 1)) {
+      uint8_t px = 0;
+      uint8_t py = 0;
+      getBossSpawnPixel(px, py);
+      drawArenaRectBorder(arduboy, px, py, BOSS_VIS_W, BOSS_VIS_H);
+    }
     return;
   }
 
@@ -508,6 +572,27 @@ const uint8_t tinyFont[] PROGMEM = {
     // x (Basic)   d (Splitter)
     0x11, 0x0e, 0x0e, 0x11, 0x1c, 0x07, 0x04, 0x18};
 
+// Шрифт босса: буквы L,O,V,I,E,Y,U в том же формате, что tinyFont. Колонно-
+// мажорное хранение (байт = колонка, бит r = строка r, бит 0 — верхняя).
+// По 4 байта на глиф подряд (glyph-major) — ровно как читает drawGlyphAt.
+// Доступен тестам.
+const uint8_t bossFont[] PROGMEM = {
+    // L: левая ножка во всю высоту + нижняя перекладина
+    0x1f, 0x10, 0x10, 0x10,
+    // O
+    0x0e, 0x11, 0x11, 0x0e,
+    // V
+    0x07, 0x18, 0x18, 0x07,
+    // I
+    0x11, 0x1f, 0x1f, 0x11,
+    // E
+    0x1f, 0x15, 0x15, 0x11,
+    // Y
+    0x01, 0x02, 0x1e, 0x01,
+    // U
+    0x0f, 0x10, 0x10, 0x0f};
+static_assert(sizeof(bossFont) == 28, "Boss font is 7 glyphs of 4 bytes");
+
 // Пишет одну колонку спрайта (байт columnBits, бит r = строка r) в плоский
 // кадровый буфер 128×64 по индексу (y/8)*128 + x, бит (y&7). При высоте до 8
 // строк задевает максимум два байта кадра. Столбцы вне экрана и строки ниже 64
@@ -713,6 +798,8 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
       }
     }
     drawStageMap(arduboy, game.combat.currentStage);
+    // Босс
+    drawBoss(arduboy, game.combat.boss);
     // Враги
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
       drawEnemy(arduboy, game.combat.enemies[i]);
@@ -752,6 +839,8 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   drawStageMap(arduboy, game.combat.currentStage);
   // Предупреждающие квадраты перед спавном волны
   drawSpawnIndicators(arduboy, game.combat);
+  // Босс-«квадрат» LOV / I E / YOU
+  drawBoss(arduboy, game.combat.boss);
   // Рисуем новых врагов
   for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
     drawEnemy(arduboy, game.combat.enemies[i]);

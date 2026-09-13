@@ -387,13 +387,25 @@ def stage_layouts_header(stages):
         symbol = name + "_map"
         rows = ["    " + ", ".join(f"0x{value:02x}" for value in data[i:i + 16]) + ","
                 for i in range(0, len(data), 16)]
+        size = STAGE_W * (STAGE_H // 8)
         lines += [
-            f"const uint8_t {symbol}[] PROGMEM = {{",
-        ] + rows + ["};"]
-        lines.append(
-            f'static_assert(sizeof({symbol}) == {STAGE_W * (STAGE_H // 8)}, '
-            f'"Stage wall map size");')
-        lines.append("")
+            "#ifdef STAGE_LAYOUTS_DEFINE",
+            f"extern const uint8_t {symbol}[] PROGMEM = {{",
+        ] + rows + [
+            "};",
+            f'static_assert(sizeof({symbol}) == {size}, ',
+            f'              "Stage wall map size");',
+            "#else",
+            f"extern const uint8_t {symbol}[] PROGMEM;",
+            "#endif",
+            "",
+        ]
+    lines += [
+        "// Определения карт живут в сборках с STAGE_LAYOUTS_DEFINE: заголовок",
+        "// включается многими TU, и без такого разделения каждая получает свою",
+        "// копию карты в flash (103*8 = 824 байта на стейдж).",
+        "",
+    ]
     return "\n".join(lines)
 
 

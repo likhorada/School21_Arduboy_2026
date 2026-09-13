@@ -179,6 +179,11 @@ void finishShop(Game& game) {
     game.combat.freezeFrames = 0;
     game.combat.burstShots = 0;
     game.player.dashFrames = 0;
+    // На босс-стейдже вместо волн из данных будет босс: сбрасываем его боевое
+    // состояние и ставим предупреждение о появлении (spawnTimer уже выставлен).
+    if (game.combat.currentStage == BOSS_STAGE) {
+        resetBossStage(game.combat);
+    }
     // Позиция переносится с прошлого стейджа; на новом поле она может
     // оказаться в стене или у края карты — возвращаем её в стартовую точку.
     game.player.x = PLAYER_START_X * FIXED_ONE;

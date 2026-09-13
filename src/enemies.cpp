@@ -1,5 +1,17 @@
 #include "enemies.h"
 #include "arena.h"
+#include "combat.h"
+
+#if defined(__AVR__)
+#include <avr/pgmspace.h>
+#else
+#ifndef PROGMEM
+#define PROGMEM
+#endif
+#ifndef pgm_read_byte
+#define pgm_read_byte(addr) (*(const uint8_t *)(addr))
+#endif
+#endif
 
 namespace gc {
 namespace {
@@ -261,6 +273,115 @@ uint8_t collectOrbs(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t playerX, int16_t play
     }
     
     return collected;
+}
+
+// === БОСС ===
+// Медленный квадратный патруль вокруг якоря: фаза (0..4*LEG_LEN-1) — тик
+// цикла. Направление — из старших 2 бит (вправо/вниз/влево/вверх), шаг 1px из
+// младших. За цикл (4 стороны по LEG_LEN) шаги взаимно гасятся, и позиция
+// возвращается точно к якорю — без таблиц и тригонометрии.
+
+// Сдвиг босса на 1px по текущей стороне квадрата (0..3: право/вниз/лево/верх).
+void stepBossPatrol(Boss& boss) {
+    const uint8_t dir = boss.phase / BOSS_PATROL_LEG_LEN;
+    int16_t dx = 0, dy = 0;
+    if (dir == 0) dx = 1;
+    else if (dir == 1) dy = 1;
+    else if (dir == 2) dx = -1;
+    else dy = -1;
+    boss.x += dx * FIXED_ONE;
+    boss.y += dy * FIXED_ONE;
+}
+
+// Один прислужник с заданной стороны босса; пропускает стену, занятость и
+// перекрытие с игроком (как обычный спавн волны).
+void spawnBossMinion(Combat& combat, int16_t sx, int16_t sy, int16_t playerX,
+                     int16_t playerY) {
+    if (!enemyPositionValid(combat.currentStage, sx, sy) ||
+        enemyOverlapsPlayer(sx, sy, playerX, playerY, true)) {
+        return;
+    }
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+        if (getEnemyType(combat.enemies[i]) == EnemyType::None) {
+            spawnEnemy(combat.enemies[i], EnemyType::Basic, sx, sy, 0,
+                       combat.currentStage);
+            return;
+        }
+    }
+}
+
+// Волна прислужников: по одному слабому мобу (Basic, HP 2) с каждой стороны.
+void spawnBossMinions(Combat& combat, int16_t playerX, int16_t playerY) {
+    const Boss& boss = combat.boss;
+    const int16_t gapX = BOSS_HALF_WIDTH * FIXED_ONE + 5 * FIXED_ONE;
+    const int16_t gapY = BOSS_HALF_HEIGHT * FIXED_ONE + 5 * FIXED_ONE;
+    spawnBossMinion(combat, boss.x - gapX, boss.y, playerX, playerY);
+    spawnBossMinion(combat, boss.x + gapX, boss.y, playerX, playerY);
+    spawnBossMinion(combat, boss.x, boss.y - gapY, playerX, playerY);
+    spawnBossMinion(combat, boss.x, boss.y + gapY, playerX, playerY);
+}
+
+void activateBoss(Combat& combat) {
+    Boss& boss = combat.boss;
+    boss = {};
+    boss.hp = BOSS_MAX_HP;
+    boss.phase = 0;
+    boss.waveTimer = BOSS_FIRST_WAVE_DELAY_FRAMES;
+    boss.x = BOSS_PATROL_ANCHOR_X * FIXED_ONE;
+    boss.y = BOSS_PATROL_ANCHOR_Y * FIXED_ONE;
+    // Фаза пробуждения: босс на арене, но пока неуязвим (spawnTimer>0 при
+    // hp>0 блокирует прицеливание и попадания пуль, см. combat.cpp).
+    combat.spawnTimer = BOSS_AWAKE_FRAMES;
+}
+
+void resetBossStage(Combat& combat) {
+    Boss& boss = combat.boss;
+    boss = {}; // hp==0: босс неактивен (на арене его нет)
+    // Предупреждение перед появлением босса — как перед волной врагов.
+    combat.spawnTimer = SPAWN_DELAY_FRAMES;
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
+        setEnemyType(combat.enemies[i], EnemyType::None);
+    for (uint8_t i = 0; i < MAX_PROJECTILES; ++i)
+        combat.projectiles[i].framesLeft = 0;
+    for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i)
+        combat.scoreOrbs[i].lifetime = 0;
+}
+
+void updateBoss(Combat& combat, int16_t playerX, int16_t playerY) {
+    Boss& boss = combat.boss;
+    if (!boss.hp) return;
+    // Волны прислужников каждые BOSS_WAVE_INTERVAL_FRAMES кадров.
+    if (--boss.waveTimer == 0) {
+        boss.waveTimer = BOSS_WAVE_INTERVAL_FRAMES;
+        spawnBossMinions(combat, playerX, playerY);
+    }
+    // Шаг 1px по квадрату каждые BOSS_STEP_INTERVAL_FRAMES кадров. Шаг привязан
+    // к счётчику волн: он падает на 1/кадр, биты 0..2 достигают нуля раз в 8
+    // кадров. Интервал якорится, пока волны кратны 8.
+    if ((boss.waveTimer & (BOSS_STEP_INTERVAL_FRAMES - 1)) == 0) {
+        stepBossPatrol(boss);
+        boss.phase = static_cast<uint8_t>(boss.phase + 1 == BOSS_PATROL_LEG_LEN * 4
+                                              ? 0 : boss.phase + 1);
+    }
+}
+
+void getBossSpawnPixel(uint8_t& x, uint8_t& y) {
+    x = BOSS_PATROL_ANCHOR_X;
+    y = BOSS_PATROL_ANCHOR_Y;
+}
+
+bool bossOverlapsPlayer(const Boss& boss, int16_t playerCenterX,
+                        int16_t playerCenterY, bool touching) {
+    const int16_t dx = shortestDelta(playerCenterX, boss.x, ARENA_WIDTH_FIXED);
+    const int16_t dy = shortestDelta(playerCenterY, boss.y, ARENA_HEIGHT_FIXED);
+    // Шаг контакта, как у врагов: застрявший на месте преследователь всё
+    // равно ранит, а игрок успевает уйти с поля боя босса до касания.
+    const int16_t margin = touching ? FIXED_ONE + 1 : 0;
+    const int16_t w = BOSS_HALF_WIDTH * FIXED_ONE +
+                      PLAYER_SIZE * FIXED_ONE / 2 + margin;
+    const int16_t h = BOSS_HALF_HEIGHT * FIXED_ONE +
+                      PLAYER_SIZE * FIXED_ONE / 2 + margin;
+    return dx > -w && dx < w && dy > -h && dy < h;
 }
 
 } // namespace gc
