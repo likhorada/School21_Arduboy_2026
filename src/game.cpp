@@ -8,6 +8,44 @@ namespace {
 constexpr uint8_t MAIN_MENU_ITEM_COUNT = 4;
 constexpr uint8_t SOUND_MENU_ITEM_COUNT = 3;
 
+// Код Конани как пасхалка и дебаг: ↑↑↓↓←→←→BA переключает бессмертие.
+// Направления кодируются числами 1-4, кнопки B и A — 5 и 6.
+// Каждое нажатие фиксируется по фронту крестовины; между нажатиями даётся
+// KONAMI_TIMEOUT кадров (~1 с), затем прогресс сбрасывается.
+const uint8_t konamiSequence[] PROGMEM = {1, 1, 2, 2, 3, 4, 3, 4, 5, 6};
+
+// Новое нажатие направления: 1 вверх, 2 вниз, 3 влево, 4 вправо; 0 = нет.
+uint8_t konamiDirectionPress(const InputFrame& input) {
+    if (input.moveX == 0 && input.moveY == 0) return 0;
+    if (input.moveY < 0) return 1;
+    if (input.moveY > 0) return 2;
+    if (input.moveX < 0) return 3;
+    return 4;
+}
+
+void updateKonami(Game& game, const InputFrame& input) {
+    const uint8_t direction = konamiDirectionPress(input);
+    const bool moving = direction != 0;
+    uint8_t press = moving && !game.directionHeld ? direction : 0;
+    if (input.activateB) press = 5;
+    if (input.activateA) press = 6;
+    game.directionHeld = moving;
+    if (press) {
+        if (press != pgm_read_byte(&konamiSequence[game.konamiProgress])) {
+            game.konamiProgress = 0;
+        } else if (++game.konamiProgress == KONAMI_SEQUENCE_SIZE) {
+            game.player.invincible = game.player.invincible ? 0 : 1;
+            game.konamiProgress = 0;
+        }
+        game.konamiTimer = 0;
+    } else if (game.konamiProgress) {
+        if (++game.konamiTimer > KONAMI_TIMEOUT) {
+            game.konamiProgress = 0;
+            game.konamiTimer = 0;
+        }
+    }
+}
+
 bool anyMenuButton(const InputFrame& input) {
     return input.activateA || input.activateB || input.moveX || input.moveY;
 }
@@ -216,6 +254,7 @@ void updateShop(Game& game, const InputFrame& input) {
 
 void updateGame(Game& game, const InputFrame& input) {
     game.combat.audioEvents = 0;
+    updateKonami(game, input);
     // Удержание A+B на полсекунды ставит паузу, повторное удержание снимает её.
     if (input.holdA && input.holdB) {
         if (game.pauseHoldFrames < PAUSE_HOLD_FRAMES) ++game.pauseHoldFrames;

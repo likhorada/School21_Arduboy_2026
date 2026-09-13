@@ -57,6 +57,7 @@ struct Player {
     uint8_t hp;           // Текущее HP (0 = мёртв)
     uint8_t maxHp;        // Макс HP (база 4, кап 6 через апгрейды)
     uint8_t iframes;      // Неуязвимость после урона (в кадрах)
+    uint8_t invincible;   // Бессмертие от кода Конами (1 = урон игнорируется)
 };
 
 // Получить направление взгляда X из упакованного facing
@@ -74,9 +75,9 @@ inline void setFacing(Player& player, int8_t x, int8_t y) {
     player.facing = (x + 1) | ((y + 1) << 2);
 }
 
-// Нанести урон игроку с IFrames
+// Нанести урон игроку с IFrames; бессмертие кодом Конами всё блокирует.
 inline void damagePlayer(Player& player) {
-    if (player.iframes == 0 && player.hp > 0) {
+    if (!player.invincible && player.iframes == 0 && player.hp > 0) {
         player.hp--;
         player.iframes = IFRAME_DURATION;
     }
@@ -120,6 +121,9 @@ struct Game {
     MenuState soundMenu;
     uint8_t soundEnabled;
     uint8_t pauseHoldFrames;  // Счётчик удержания A+B для паузы
+    uint8_t konamiProgress;   // Код Конами: позиция в последовательности
+    uint8_t konamiTimer;      // Кадры с последнего нажатия (таймаут сброса)
+    uint8_t directionHeld;    // 1 = крестовина зажата (фронт нажатия)
 };
 
 // Ввод на один кадр
@@ -148,9 +152,9 @@ void applyShopChoice(Game& game);
 void updateGame(Game& game, const InputFrame& input);
 
 #ifdef __AVR__
-static_assert(sizeof(Player) == 14, "Packed player must use 14 AVR bytes");
+static_assert(sizeof(Player) == 15, "Packed player must use 15 AVR bytes");
 static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) +
-                              sizeof(ShopState) + sizeof(MenuState) * 2 + 2,
+                              sizeof(ShopState) + sizeof(MenuState) * 2 + 2 + 3,
               "Unexpected AVR game layout");
 #endif
 

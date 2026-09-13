@@ -32,6 +32,10 @@ constexpr uint8_t SPAWN_DELAY_FRAMES = 30;
 // Пауза: удержание A+B на полсекунды (~0.5s при 62.5 FPS).
 constexpr uint8_t PAUSE_HOLD_FRAMES = 31;
 
+// Код Конани: окно между нажатиями и длина последовательности.
+constexpr uint8_t KONAMI_TIMEOUT = 60; // ~1 секунда на шаг кода.
+constexpr uint8_t KONAMI_SEQUENCE_SIZE = 10;
+
 constexpr uint8_t MAX_PROJECTILES = 4;
 constexpr uint8_t SHOT_INTERVAL = 15; // 0,4 секунды между подходами очереди.
 constexpr uint8_t SHOT_BURST_COUNT =

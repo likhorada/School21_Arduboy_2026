@@ -679,6 +679,61 @@ void testPause() {
     assert(game.state == GameState::Playing);
 }
 
+void testKonamiCheat() {
+    Game game = playingAt(5 * FIXED_ONE, 5 * FIXED_ONE);
+    const InputFrame up = {0, -1, false, false, false, false};
+    const InputFrame down = {0, 1, false, false, false, false};
+    const InputFrame left = {-1, 0, false, false, false, false};
+    const InputFrame right = {1, 0, false, false, false, false};
+    const InputFrame pressB = {0, 0, false, true, false, true};
+    const InputFrame pressA = {0, 0, true, false, true, false};
+    // Нажатия крестовины — по фронту, поэтому между ними отпускаем.
+    const InputFrame taps[] = {up, up, down, down, left, right, left, right,
+                               pressB, pressA};
+    assert(!game.player.invincible);
+    for (const InputFrame& tap : taps) {
+        updateGame(game, tap);
+        updateGame(game, idle);
+    }
+    assert(game.player.invincible == 1);
+    // Бессмертие блокирует урон, не тратя HP.
+    const uint8_t hp = game.player.hp;
+    damagePlayer(game.player);
+    assert(game.player.hp == hp && game.player.iframes == 0);
+
+    // Ошибка в середине сбрасывает прогресс: после ←→←→ жмём ↓ вместо B.
+    game = playingAt(5 * FIXED_ONE, 5 * FIXED_ONE);
+    assert(!game.player.invincible);
+    updateGame(game, up); updateGame(game, idle);
+    updateGame(game, up); updateGame(game, idle);
+    updateGame(game, down); updateGame(game, idle);
+    updateGame(game, down); updateGame(game, idle);
+    updateGame(game, left); updateGame(game, idle);
+    updateGame(game, right); updateGame(game, idle);
+    updateGame(game, left); updateGame(game, idle);
+    updateGame(game, right); updateGame(game, idle);
+    updateGame(game, down); updateGame(game, idle); // неверно: ожидается B
+    assert(game.konamiProgress == 0 && !game.player.invincible);
+    // Корректный полный код после сброса даёт бессмертие.
+    for (const InputFrame& tap : taps) { updateGame(game, tap); updateGame(game, idle); }
+    assert(game.player.invincible == 1);
+
+    // Повторный код выключает бессмертие (тумблер для дебага).
+    for (const InputFrame& tap : taps) {
+        updateGame(game, tap);
+        updateGame(game, idle);
+    }
+    assert(game.player.invincible == 0);
+
+    // Пауза между нажатиями дольше таймаута сбрасывает последовательность.
+    game = playingAt(5 * FIXED_ONE, 5 * FIXED_ONE);
+    updateGame(game, up); updateGame(game, idle);
+    updateGame(game, up); updateGame(game, idle);
+    assert(game.konamiProgress == 2);
+    for (unsigned frame = 0; frame <= KONAMI_TIMEOUT; ++frame) updateGame(game, idle);
+    assert(game.konamiProgress == 0);
+}
+
 } // Конец анонимного пространства имён.
 
 int main() {
@@ -694,5 +749,6 @@ int main() {
     testMapConnectivity();
     testRandomizedInput();
     testPause();
+    testKonamiCheat();
     std::puts("All gameplay tests passed.");
 }
