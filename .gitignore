@@ -1,0 +1,5 @@
+/build/
+assets/*.h
+src/.vscode/
+tools/__pycache__/
+*.pyc
