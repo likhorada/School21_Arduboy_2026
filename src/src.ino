@@ -67,7 +67,7 @@ void updateAudio(uint8_t previousHp) {
     }
 }
 
-// Сохраняем штатную инициализацию, USB и режим восстановления Arduboy2.
+// Сохраняем штатную инициализацию дисплея, звука и recovery-режим Arduboy2.
 void setup() {
     arduboy.begin();
     arduboy.setFrameDuration(gc::FRAME_DURATION_MS);

@@ -388,11 +388,41 @@ void drawPassiveCard(Arduboy2 &arduboy, const Game& game, PassiveId id) {
   const uint8_t level = passiveLevel(game.passives, id);
   arduboy.setCursor(100, 16);
   for (uint8_t i = 0; i < level; ++i) arduboy.print(F("+"));
+
+  arduboy.setCursor(0, 24);
+  switch (id) {
+  case PassiveId::CompilerOptimization:
+    arduboy.print(F("MOVE SPEED +20%"));
+    break;
+  case PassiveId::Overclock:
+    arduboy.print(F("FIRE RATE +33%"));
+    break;
+  case PassiveId::OptimizedBuild:
+    arduboy.print(F("DAMAGE +20%"));
+    break;
+  case PassiveId::MemoryFragmentation:
+    arduboy.print(F("+1 TARGET PER VOLLEY"));
+    break;
+  case PassiveId::CollectionRange:
+    arduboy.print(F("AUTO RANGE +30%"));
+    break;
+  case PassiveId::RamCapacity:
+    arduboy.print(F("MAX HP +1"));
+    break;
+  default:
+    return;
+  }
+  arduboy.setCursor(0, 32);
+  arduboy.print(F("MAX LEVEL "));
+  arduboy.print(passiveCap(id));
 }
 
 void drawActiveCard(Arduboy2 &arduboy, AbilityId id) {
   arduboy.setCursor(34, 16);
   switch (id) {
+  case AbilityId::Dash:
+    arduboy.print(F("DASH"));
+    break;
   case AbilityId::TimeWarp:
     arduboy.print(F("TIME WARP"));
     break;
@@ -415,8 +445,46 @@ void drawActiveCard(Arduboy2 &arduboy, AbilityId id) {
     arduboy.print(F("MEM DUMP"));
     break;
   default:
-    break;
+    return;
   }
+
+  arduboy.setCursor(0, 24);
+  switch (id) {
+  case AbilityId::Dash:
+    arduboy.print(F("DASH + INVULNERABLE"));
+    break;
+  case AbilityId::TimeWarp:
+    arduboy.print(F("SLOW MOBS 5 SEC"));
+    break;
+  case AbilityId::RecursiveCall:
+    arduboy.print(F("2 CLONES, TRIPLE FIRE"));
+    break;
+  case AbilityId::Free:
+    arduboy.print(F("KILL WEAK, HIT MOBS"));
+    break;
+  case AbilityId::BitShift:
+    arduboy.print(F("REVERSE MOB MOVE"));
+    break;
+  case AbilityId::MarkAndSweep:
+    arduboy.print(F("DAMAGE + PUSH MOBS"));
+    break;
+  case AbilityId::StackOverflow:
+    arduboy.print(F("12 DOUBLE-DMG SHOTS"));
+    break;
+  case AbilityId::MemoryDump:
+    arduboy.print(F("MOB DAMAGE PUDDLE"));
+    break;
+  default:
+    return;
+  }
+  const uint8_t cooldown = id == AbilityId::Dash ? 4
+                           : id == AbilityId::TimeWarp || id == AbilityId::BitShift ? 8
+                           : id == AbilityId::MarkAndSweep || id == AbilityId::StackOverflow ? 6
+                           : 10;
+  arduboy.setCursor(0, 32);
+  arduboy.print(F("COOLDOWN "));
+  arduboy.print(cooldown);
+  arduboy.print(F(" SEC"));
 }
 
 // Рисуем правую колонку UI (x=104, 6 строк по 8px)

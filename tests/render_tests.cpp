@@ -31,6 +31,21 @@ int main() {
     for (uint8_t row = 0; row < 8; ++row)
         assert(std::strncmp(display.text[row], about[row], std::strlen(about[row])) == 0);
     initShop(game);
+    const char* passiveDescriptions[] = {
+        "", "MOVE SPEED +20%", "FIRE RATE +33%", "DAMAGE +20%",
+        "+1 TARGET PER VOLLEY", "AUTO RANGE +30%", "MAX HP +1"};
+    const char* passiveLimits[] = {
+        "", "MAX LEVEL 2", "MAX LEVEL 3", "MAX LEVEL 2",
+        "MAX LEVEL 3", "MAX LEVEL 2", "MAX LEVEL 2"};
+    const char* activeDescriptions[] = {
+        "", "DASH + INVULNERABLE", "SLOW MOBS 5 SEC",
+        "2 CLONES, TRIPLE FIRE", "KILL WEAK, HIT MOBS",
+        "REVERSE MOB MOVE", "DAMAGE + PUSH MOBS",
+        "12 DOUBLE-DMG SHOTS", "MOB DAMAGE PUDDLE"};
+    const char* activeCooldowns[] = {
+        "", "COOLDOWN 4 SEC", "COOLDOWN 8 SEC", "COOLDOWN 10 SEC",
+        "COOLDOWN 10 SEC", "COOLDOWN 8 SEC", "COOLDOWN 6 SEC",
+        "COOLDOWN 6 SEC", "COOLDOWN 10 SEC"};
     for (uint8_t category = 0; category < 2; ++category) {
         game.shop.category = static_cast<ShopCategory>(category);
         for (uint8_t selected = 0; selected < 3; ++selected) {
@@ -40,6 +55,16 @@ int main() {
             assert(std::strncmp(&display.text[0][3], category ? "ACTIVE UPGRADE" : "PASSIVE UPGRADE",
                                 category ? 14 : 15) == 0);
             assert(display.text[7][8] == '1' + selected);
+            const uint8_t choice = shopChoice(
+                game, static_cast<ShopCategory>(category), selected);
+            const char* description = category ? activeDescriptions[choice]
+                                               : passiveDescriptions[choice];
+            const char* detail = category ? activeCooldowns[choice]
+                                          : passiveLimits[choice];
+            assert(std::strncmp(display.text[3], description,
+                                std::strlen(description)) == 0);
+            assert(std::strncmp(display.text[4], detail,
+                                std::strlen(detail)) == 0);
             if (category) {
                 game.shop.choosingSlot = true;
                 for (uint8_t id = 0; id <= 8; ++id) {
@@ -48,9 +73,8 @@ int main() {
                 }
                 game.shop.choosingSlot = false;
             } else {
-                const PassiveId choice = static_cast<PassiveId>(
-                    shopChoice(game, ShopCategory::Passive, selected));
-                setPassiveLevel(game.passives, choice, passiveCap(choice));
+                const PassiveId passive = static_cast<PassiveId>(choice);
+                setPassiveLevel(game.passives, passive, passiveCap(passive));
                 game.combat.playerScore = 65535;
                 renderGame(display, game);
             }

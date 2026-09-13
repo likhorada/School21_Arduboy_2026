@@ -27,7 +27,8 @@ test:
 	$(CXX) -std=c++14 -O2 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -Itests/stubs -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/lzss.cpp $(SKETCH)/render.cpp tests/render_tests.cpp -o "$(BUILD)/tests/render_tests"
 	"$(BUILD)/tests/render_tests"
 
-# Пример загрузки: make upload PORT=/dev/ttyACM0
-upload: build
+# USB runtime отключён ради памяти: сначала make build, затем удерживайте DOWN
+# при reset и сразу запускайте make upload PORT=/dev/ttyACM0.
+upload:
 	@test -n "$(PORT)" || { printf 'Set PORT, e.g. make upload PORT=/dev/ttyACM0\n'; exit 1; }
 	$(ARDUINO_CLI) upload --fqbn $(FQBN) --port "$(PORT)" --input-dir "$(BUILD)/avr" $(SKETCH)
