@@ -22,6 +22,14 @@ int main() {
         game.state = state;
         renderGame(display, game);
     }
+    game.state = GameState::About;
+    renderGame(display, game);
+    const char* about[] = {
+        "YOU ARE THE", "INDISPENSABLE", "GARBAGE COLLECTOR",
+        "REMOVE USELESS DATA", "MAKE DEV PROUD", "YOU START WITH DASH",
+        "MOVE DPAD A/B SKILLS", "B BACK TO MENU"};
+    for (uint8_t row = 0; row < 8; ++row)
+        assert(std::strncmp(display.text[row], about[row], std::strlen(about[row])) == 0);
     initShop(game);
     for (uint8_t category = 0; category < 2; ++category) {
         game.shop.category = static_cast<ShopCategory>(category);
@@ -309,6 +317,34 @@ int main() {
                 }
             }
         }
+    }
+    // Финальный этап показывает мигающую рамку, затем надпись-босса.
+    {
+        game.state = GameState::Playing;
+        game.combat = {};
+        game.combat.currentStage = BOSS_STAGE;
+        game.combat.spawnTimer = 1;
+        game.player.x = 20 * FIXED_ONE;
+        game.player.y = 20 * FIXED_ONE;
+        renderGame(display, game);
+        uint8_t px, py;
+        getBossSpawnPixel(px, py);
+        const int16_t left = px - BOSS_VIS_W / 2;
+        const int16_t top = py - BOSS_VIS_H / 2;
+        assert(display.pixels[top][left] == WHITE);
+        assert(display.pixels[top + BOSS_VIS_H - 1][left] == WHITE);
+        assert(display.pixels[top][left + BOSS_VIS_W - 1] == WHITE);
+
+        game.combat.spawnTimer = 0;
+        game.combat.boss.hpFifths = BOSS_MAX_HP * 5;
+        game.combat.boss.x = 70 * FIXED_ONE;
+        game.combat.boss.y = 32 * FIXED_ONE;
+        renderGame(display, game);
+        const int16_t startX = 70 - BOSS_VIS_W / 2;
+        const int16_t startY = 32 - BOSS_VIS_H / 2;
+        assert(display.pixels[startY][startX] == WHITE); // L
+        assert(display.pixels[startY][startX + BOSS_COL_PITCH + 1] == WHITE); // O
+        assert(display.pixels[startY + 2 * BOSS_ROW_PITCH + 4][startX + 2] == WHITE); // Y
     }
     std::puts("Render regressions passed: screen bounds, menu text, hearts, score, cooldowns, arena isolation, sprites, menu screens, fonts.");
 }

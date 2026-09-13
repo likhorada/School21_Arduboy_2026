@@ -158,6 +158,8 @@ void testMainMenu() {
     updateGame(game, idle);
     updateGame(game, pressA);
     assert(game.state == GameState::About);
+    updateGame(game, pressA);
+    assert(game.state == GameState::About);
     updateGame(game, pressB);
     assert(game.state == GameState::Menu);
 

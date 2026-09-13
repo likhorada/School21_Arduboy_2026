@@ -7,6 +7,7 @@ namespace gc {
 
 constexpr uint8_t AUDIO_EVENT_ENEMY_DEATH = 1 << 0;
 constexpr uint8_t AUDIO_EVENT_COIN = 1 << 1;
+constexpr int8_t BOSS_HIT = MAX_ENEMIES;
 
 // Пуля: летит по прямой. Координаты и скорости в единицах 1/16 пикселя.
 // framesLeft == 0 означает пустой слот.
@@ -26,6 +27,7 @@ struct Combat {
     Enemy enemies[MAX_ENEMIES];
     ScoreOrb scoreOrbs[MAX_SCORE_ORBS];
     uint16_t playerScore;
+    Boss boss;
     
     // Прогресс по стейджам
     uint8_t currentStage;       // Текущий стейдж (0-based)
@@ -57,6 +59,7 @@ void updateCombat(Combat& combat, int16_t playerX, int16_t playerY,
                   uint8_t fragmentationLevel = 0, uint8_t rangeLevel = 0);
 void damageEnemy(Combat& combat, uint8_t index, uint8_t damage);
 void damageEnemyFifths(Combat& combat, uint8_t index, uint8_t damage);
+void damageBossFifths(Combat& combat, uint8_t damage);
 
 int16_t projectileX(const Projectile& projectile);
 int16_t projectileY(const Projectile& projectile);
@@ -82,5 +85,9 @@ bool checkPlayerEnemyCollisions(const Combat& combat, int16_t playerX, int16_t p
 
 static_assert(sizeof(Enemy) == 6, "Enemy must be 6 bytes");
 static_assert(sizeof(ScoreOrb) == 4, "ScoreOrb must be 4 bytes");
+#ifdef __AVR__
+static_assert(sizeof(Boss) == 9, "Boss must be 9 AVR bytes");
+static_assert(sizeof(Combat) == 136, "Combat must be 136 AVR bytes");
+#endif
 
 } // пространство имён gc

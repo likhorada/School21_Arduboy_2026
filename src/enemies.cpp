@@ -1,5 +1,6 @@
 #include "enemies.h"
 #include "arena.h"
+#include "combat.h"
 
 namespace gc {
 namespace {
@@ -292,6 +293,91 @@ void pushEnemyAway(Enemy& enemy, int16_t playerX, int16_t playerY,
         }
         if (!moved) break;
     }
+}
+
+namespace {
+
+void stepBossPatrol(Boss& boss) {
+    const uint8_t direction = boss.phase / BOSS_PATROL_LEG_LEN;
+    if (direction == 0) boss.x += FIXED_ONE;
+    else if (direction == 1) boss.y += FIXED_ONE;
+    else if (direction == 2) boss.x -= FIXED_ONE;
+    else boss.y -= FIXED_ONE;
+    boss.phase = static_cast<uint8_t>(
+        boss.phase + 1 == BOSS_PATROL_LEG_LEN * 4 ? 0 : boss.phase + 1);
+}
+
+void spawnBossMinion(Combat& combat, int16_t x, int16_t y,
+                     int16_t playerX, int16_t playerY) {
+    if (!enemyPositionValid(BOSS_STAGE, x, y) ||
+        enemyOverlapsPlayer(x, y, playerX, playerY, true)) return;
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
+        if (getEnemyType(combat.enemies[i]) == EnemyType::None) {
+            spawnEnemy(combat.enemies[i], EnemyType::Basic, x, y, 0,
+                       BOSS_STAGE);
+            return;
+        }
+    }
+}
+
+void spawnBossMinions(Combat& combat, int16_t playerX, int16_t playerY) {
+    const int16_t x = combat.boss.x, y = combat.boss.y;
+    const int16_t gapX = (BOSS_HALF_WIDTH + 5) * FIXED_ONE;
+    const int16_t gapY = (BOSS_HALF_HEIGHT + 5) * FIXED_ONE;
+    spawnBossMinion(combat, x - gapX, y, playerX, playerY);
+    spawnBossMinion(combat, x + gapX, y, playerX, playerY);
+    spawnBossMinion(combat, x, y - gapY, playerX, playerY);
+    spawnBossMinion(combat, x, y + gapY, playerX, playerY);
+}
+
+} // namespace
+
+void activateBoss(Combat& combat) {
+    combat.boss = {};
+    combat.boss.x = BOSS_PATROL_ANCHOR_X * FIXED_ONE;
+    combat.boss.y = BOSS_PATROL_ANCHOR_Y * FIXED_ONE;
+    combat.boss.hpFifths = BOSS_MAX_HP * 5;
+    combat.boss.waveTimer = BOSS_FIRST_WAVE_DELAY_FRAMES;
+    combat.spawnTimer = BOSS_AWAKE_FRAMES;
+}
+
+void resetBossStage(Combat& combat) {
+    combat.boss = {};
+    combat.spawnTimer = SPAWN_DELAY_FRAMES;
+    for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
+        setEnemyType(combat.enemies[i], EnemyType::None);
+    for (uint8_t i = 0; i < MAX_PROJECTILES; ++i)
+        combat.projectiles[i].framesLeft = 0;
+    for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i)
+        combat.scoreOrbs[i].lifetime = 0;
+}
+
+void updateBoss(Combat& combat, int16_t playerX, int16_t playerY) {
+    Boss& boss = combat.boss;
+    if (!boss.hpFifths) return;
+    if (--boss.waveTimer == 0) {
+        boss.waveTimer = BOSS_WAVE_INTERVAL_FRAMES;
+        spawnBossMinions(combat, playerX, playerY);
+    }
+    if ((boss.waveTimer & (BOSS_STEP_INTERVAL_FRAMES - 1)) == 0)
+        stepBossPatrol(boss);
+}
+
+void getBossSpawnPixel(uint8_t& x, uint8_t& y) {
+    x = BOSS_PATROL_ANCHOR_X;
+    y = BOSS_PATROL_ANCHOR_Y;
+}
+
+bool bossOverlapsPlayer(const Boss& boss, int16_t playerCenterX,
+                        int16_t playerCenterY, bool touching) {
+    const int16_t dx = shortestDelta(playerCenterX, boss.x, ARENA_WIDTH_FIXED);
+    const int16_t dy = shortestDelta(playerCenterY, boss.y, ARENA_HEIGHT_FIXED);
+    const int16_t margin = touching ? FIXED_ONE + 1 : 0;
+    const int16_t width = BOSS_HALF_WIDTH * FIXED_ONE +
+                          PLAYER_SIZE * FIXED_ONE / 2 + margin;
+    const int16_t height = BOSS_HALF_HEIGHT * FIXED_ONE +
+                           PLAYER_SIZE * FIXED_ONE / 2 + margin;
+    return dx > -width && dx < width && dy > -height && dy < height;
 }
 
 } // namespace gc

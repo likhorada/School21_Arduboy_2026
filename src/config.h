@@ -63,6 +63,24 @@ static_assert(SHOT_RANGE > 0 && SHOT_RANGE <= ARENA_WIDTH / 2,
 static_assert(PROJECTILE_LIFETIME >= AIM_PREVIEW_FRAMES && SHOT_DAMAGE > 0,
               "Shots must live long enough to reach a target");
 
+// Финальный этап: босс появляется после предупреждения, пробуждается без урона,
+// патрулирует квадрат 4x4 и периодически выпускает четырёх слабых противников.
+constexpr uint8_t BOSS_STAGE = 2;
+constexpr uint8_t BOSS_MAX_HP = 100;
+constexpr uint8_t BOSS_SCORE = 100;
+constexpr uint16_t BOSS_WAVE_INTERVAL_FRAMES = 632;
+constexpr uint8_t BOSS_FIRST_WAVE_DELAY_FRAMES = 64;
+constexpr uint8_t BOSS_AWAKE_FRAMES = 88;
+constexpr uint8_t BOSS_STEP_INTERVAL_FRAMES = 8;
+constexpr uint8_t BOSS_PATROL_LEG_LEN = 4;
+constexpr uint8_t BOSS_PATROL_ANCHOR_X = 73;
+constexpr uint8_t BOSS_PATROL_ANCHOR_Y = 32;
+constexpr uint8_t BOSS_HALF_WIDTH = 7;
+constexpr uint8_t BOSS_HALF_HEIGHT = 8;
+static_assert(BOSS_MAX_HP * 5 <= 0xFFFF &&
+                  BOSS_PATROL_LEG_LEN * 4 <= 0xFF,
+              "Boss state must fit in compact fields");
+
 // === ИГРОВЫЕ КОНСТАНТЫ ===
 // HP и неуязвимость
 constexpr uint8_t PLAYER_BASE_MAX_HP = 4;

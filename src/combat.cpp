@@ -98,6 +98,24 @@ int8_t findHit(const Combat &combat, int16_t x, int16_t y, int16_t dx,
     if (segmentHitsBox(x, y, dx, dy, box))
       return i;
   }
+  if (combat.currentStage == BOSS_STAGE && combat.boss.hpFifths &&
+      combat.spawnTimer == 0) {
+    const Boss& boss = combat.boss;
+    const int16_t sx = shortestDelta(x, boss.x, ARENA_WIDTH_FIXED);
+    const int16_t sy = shortestDelta(y, boss.y, ARENA_HEIGHT_FIXED);
+    const int16_t bossSpanX = (dx < 0 ? -dx : dx) + BOSS_HALF_WIDTH * FIXED_ONE;
+    const int16_t bossSpanY = (dy < 0 ? -dy : dy) + BOSS_HALF_HEIGHT * FIXED_ONE;
+    if (sx <= bossSpanX && sx >= -bossSpanX && sy <= bossSpanY &&
+        sy >= -bossSpanY) {
+      const Obstacle box = {
+          uint8_t(wrapCoordinate(boss.x / FIXED_ONE - BOSS_HALF_WIDTH,
+                                 ARENA_WIDTH)),
+          uint8_t(wrapCoordinate(boss.y / FIXED_ONE - BOSS_HALF_HEIGHT,
+                                 ARENA_HEIGHT)),
+          2 * BOSS_HALF_WIDTH, 2 * BOSS_HALF_HEIGHT};
+      if (segmentHitsBox(x, y, dx, dy, box)) return BOSS_HIT;
+    }
+  }
   return NO_HIT;
 }
 
@@ -167,14 +185,16 @@ void resetCombat(Combat &combat) {
 // Read-only contact query; health and invulnerability belong to the player.
 bool checkPlayerEnemyCollisions(const Combat &combat, int16_t playerX,
                                 int16_t playerY, bool touching) {
+  const int16_t playerCenterX = playerX + (PLAYER_SIZE * FIXED_ONE) / 2;
+  const int16_t playerCenterY = playerY + (PLAYER_SIZE * FIXED_ONE) / 2;
+  if (combat.currentStage == BOSS_STAGE && combat.boss.hpFifths &&
+      bossOverlapsPlayer(combat.boss, playerCenterX, playerCenterY, touching))
+    return true;
   for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
     const Enemy &enemy = combat.enemies[i];
     if (getEnemyType(enemy) == EnemyType::None) {
       continue;
     }
-    // Player coordinates are top-left; enemies store centers.
-    const int16_t playerCenterX = playerX + (PLAYER_SIZE * FIXED_ONE) / 2;
-    const int16_t playerCenterY = playerY + (PLAYER_SIZE * FIXED_ONE) / 2;
     if (enemyOverlapsPlayer(enemy.x, enemy.y, playerCenterX, playerCenterY,
                             touching)) {
       return true;
@@ -207,8 +227,12 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
                 combat.currentStage, combat.timeWarpTicks != 0,
                 combat.bitShiftTicks != 0);
 
-  // Новые враги первый кадр остаются точно на индикаторах.
-  if (combat.spawnTimer > 0 && --combat.spawnTimer == 0) {
+  if (combat.currentStage == BOSS_STAGE) {
+    if (combat.spawnTimer > 0 && --combat.spawnTimer == 0 &&
+        !combat.boss.hpFifths)
+      activateBoss(combat);
+    if (combat.boss.hpFifths) updateBoss(combat, originX, originY);
+  } else if (combat.spawnTimer > 0 && --combat.spawnTimer == 0) {
     spawnCurrentWave(combat, originX, originY);
   }
 
@@ -226,7 +250,8 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
       const uint8_t damage = mode == HalfDamage ? baseDamage / 2
                              : mode == DoubleDamage ? baseDamage * 2
                                                     : baseDamage;
-      damageEnemyFifths(combat, hit, damage);
+      if (hit == BOSS_HIT) damageBossFifths(combat, damage);
+      else damageEnemyFifths(combat, hit, damage);
     }
   }
 
@@ -276,11 +301,14 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
   const int16_t range = uint16_t(SHOT_RANGE_FIXED) * (10 + rangeLevel * 3) / 10;
   const uint32_t rangeSquared = static_cast<uint32_t>(range) * range;
   uint8_t usedTargets = 0;
+  bool bossUsed = false;
   bool fired = false;
   for (uint8_t shotIndex = 0; shotIndex <= fragmentationLevel; ++shotIndex) {
-    uint8_t bestTarget = MAX_ENEMIES;
+    constexpr uint8_t NO_TARGET = 0xFF;
+    uint8_t bestTarget = NO_TARGET;
     uint32_t bestDistanceSquared = rangeSquared + 1;
     int16_t bestDx = 0, bestDy = 0;
+    int16_t targetX = 0, targetY = 0;
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
       const Enemy& enemy = combat.enemies[i];
       if ((usedTargets & (1 << i)) || getEnemyType(enemy) == EnemyType::None)
@@ -295,26 +323,43 @@ void updateCombat(Combat &combat, int16_t playerX, int16_t playerY,
         bestTarget = i;
         bestDx = dx;
         bestDy = dy;
+        targetX = enemy.x;
+        targetY = enemy.y;
       }
     }
-    if (bestTarget == MAX_ENEMIES) break;
-    usedTargets |= uint8_t(1 << bestTarget);
+    if (!bossUsed && combat.currentStage == BOSS_STAGE &&
+        combat.boss.hpFifths && combat.spawnTimer == 0) {
+      const int16_t dx = shortestDelta(originX, combat.boss.x, ARENA_WIDTH_FIXED);
+      const int16_t dy = shortestDelta(originY, combat.boss.y, ARENA_HEIGHT_FIXED);
+      const uint32_t distanceSquared = static_cast<int32_t>(dx) * dx +
+                                       static_cast<int32_t>(dy) * dy;
+      if (distanceSquared < bestDistanceSquared &&
+          !shotBlocked(BOSS_STAGE, originX, originY, dx, dy)) {
+        bestTarget = BOSS_HIT;
+        bestDx = dx;
+        bestDy = dy;
+        targetX = combat.boss.x;
+        targetY = combat.boss.y;
+      }
+    }
+    if (bestTarget == NO_TARGET) break;
+    if (bestTarget == BOSS_HIT) bossUsed = true;
+    else usedTargets |= uint8_t(1 << bestTarget);
     fired |= createProjectile(combat, originX, originY,
                               directionFor(bestDx, bestDy), NormalDamage);
     if (combat.recursiveTicks) {
-      const Enemy& target = combat.enemies[bestTarget];
       const int16_t leftX = wrapCoordinate(originX - 8 * FIXED_ONE,
                                             ARENA_WIDTH_FIXED);
       const int16_t rightX = wrapCoordinate(originX + 8 * FIXED_ONE,
                                              ARENA_WIDTH_FIXED);
       createProjectile(combat, leftX, originY,
-                       directionFor(shortestDelta(leftX, target.x, ARENA_WIDTH_FIXED),
-                                    shortestDelta(originY, target.y, ARENA_HEIGHT_FIXED)),
-                       HalfDamage);
+                        directionFor(shortestDelta(leftX, targetX, ARENA_WIDTH_FIXED),
+                                     shortestDelta(originY, targetY, ARENA_HEIGHT_FIXED)),
+                        HalfDamage);
       createProjectile(combat, rightX, originY,
-                       directionFor(shortestDelta(rightX, target.x, ARENA_WIDTH_FIXED),
-                                    shortestDelta(originY, target.y, ARENA_HEIGHT_FIXED)),
-                       HalfDamage);
+                        directionFor(shortestDelta(rightX, targetX, ARENA_WIDTH_FIXED),
+                                     shortestDelta(originY, targetY, ARENA_HEIGHT_FIXED)),
+                        HalfDamage);
     }
   }
   if (fired) {
@@ -396,10 +441,27 @@ void getSpawnPixel(uint8_t stage, uint8_t wave, uint8_t index, uint8_t &x,
   y = ARENA_HEIGHT / 2;
 }
 
+void finishStage(Combat& combat) {
+  for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
+    if (combat.scoreOrbs[i].lifetime)
+      combat.playerScore += combat.scoreOrbs[i].value;
+    combat.scoreOrbs[i].lifetime = 0;
+  }
+  for (uint8_t i = 0; i < MAX_PROJECTILES; ++i)
+    combat.projectiles[i].framesLeft = 0;
+  for (uint8_t i = 0; i < MAX_ENEMIES; ++i)
+    setEnemyType(combat.enemies[i], EnemyType::None);
+  combat.playerScore += remainingSeconds(combat.stageTimer) *
+                        STAGE_TIME_BONUS_MULT;
+  combat.stageCleared = true;
+  combat.spawnTimer = 0;
+}
+
 // Проверка завершения волны и переход к следующей
 void checkWaveCompletion(Combat &combat) {
   if (combat.spawnTimer > 0 || combat.stageCleared)
     return;
+  if (combat.currentStage == BOSS_STAGE) return;
   // Проверяем, есть ли живые враги
   bool anyAlive = false;
   for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
@@ -422,28 +484,25 @@ void checkWaveCompletion(Combat &combat) {
     const uint8_t totalWaves = getStageWaveCount(combat.currentStage);
 
     if (combat.currentWave >= totalWaves) {
-      // Bank remaining drops before leaving; no rewards disappear in the shop.
-      for (uint8_t i = 0; i < MAX_SCORE_ORBS; ++i) {
-        if (combat.scoreOrbs[i].lifetime)
-          combat.playerScore += combat.scoreOrbs[i].value;
-        combat.scoreOrbs[i].lifetime = 0;
-      }
-      for (uint8_t i = 0; i < MAX_PROJECTILES; ++i)
-        combat.projectiles[i].framesLeft = 0;
-      // Стейдж завершён: бонус за оставшееся время
-      const uint16_t timeBonus =
-          remainingSeconds(combat.stageTimer) * STAGE_TIME_BONUS_MULT;
-      combat.playerScore += timeBonus;
-
-      // Keep this stage's index/timer for its results. Shop advances the index.
-      combat.stageCleared = true;
-      combat.spawnTimer = 0;
+      finishStage(combat);
       return;
     }
 
     // Задержка перед спавном следующей волны (показываем индикаторы)
     combat.spawnTimer = SPAWN_DELAY_FRAMES;
   }
+}
+
+void damageBossFifths(Combat& combat, uint8_t damage) {
+  if (!combat.boss.hpFifths || !damage) return;
+  if (combat.boss.hpFifths > damage) {
+    combat.boss.hpFifths -= damage;
+    return;
+  }
+  combat.boss.hpFifths = 0;
+  combat.playerScore += BOSS_SCORE;
+  combat.audioEvents |= AUDIO_EVENT_ENEMY_DEATH;
+  finishStage(combat);
 }
 
 void damageEnemyFifths(Combat &combat, uint8_t index, uint8_t damage) {

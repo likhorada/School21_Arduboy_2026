@@ -253,6 +253,8 @@ void finishShop(Game& game) {
     game.combat.spiralShots = 0;
     game.combat.visualEffect = 0;
     game.player.dashFrames = 0;
+    if (game.combat.currentStage == BOSS_STAGE)
+        resetBossStage(game.combat);
     // Позиция переносится с прошлого стейджа; на новом поле она может
     // оказаться в стене или у края карты — возвращаем её в стартовую точку.
     game.player.x = PLAYER_START_X * FIXED_ONE;
@@ -364,10 +366,10 @@ void updateGame(Game& game, const InputFrame& input) {
         }
         return;
     }
-  if (game.state == GameState::About) {
-    if (input.activateB) game.state = GameState::Menu;
-    return;
-  }
+    if (game.state == GameState::About) {
+        if (input.activateB) game.state = GameState::Menu;
+        return;
+    }
     if (game.state == GameState::SoundMenu) {
         updateSelection(game.soundMenu, input.moveY, SOUND_MENU_ITEM_COUNT);
         if (input.activateB) {

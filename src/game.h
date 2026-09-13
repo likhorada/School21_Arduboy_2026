@@ -9,7 +9,6 @@ enum class GameState : uint8_t {
     Intro,
     Menu,
     About,
-    Rules,
     SoundMenu,
     Playing,
     Paused,
@@ -191,6 +190,7 @@ void updateGame(Game& game, const InputFrame& input);
 
 #ifdef __AVR__
 static_assert(sizeof(Player) == 15, "Packed player must use 15 AVR bytes");
+static_assert(sizeof(Game) == 168, "Game must use 168 AVR bytes");
 static_assert(sizeof(Game) == 1 + sizeof(Player) + sizeof(PlayerPassives) + sizeof(Combat) +
                               sizeof(ShopState) + sizeof(MenuState) * 2 + 2 + 3,
               "Unexpected AVR game layout");

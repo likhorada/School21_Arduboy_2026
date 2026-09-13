@@ -12,6 +12,16 @@ enum class EnemyType : uint8_t {
   Fast,     // 0f - быстрый, HP влияет на скорость
 };
 
+struct Combat;
+
+struct Boss {
+  int16_t x;
+  int16_t y;
+  uint16_t hpFifths;
+  uint16_t waveTimer;
+  uint8_t phase;
+};
+
 // Упрощённый враг с минимальной памятью
 struct Enemy {
   int16_t x; // Субпиксели (1/16 пикселя)
@@ -103,6 +113,13 @@ void updateEnemies(Enemy enemies[MAX_ENEMIES], ScoreOrb orbs[MAX_SCORE_ORBS],
 
 void pushEnemyAway(Enemy& enemy, int16_t playerX, int16_t playerY,
                    uint8_t stage, uint8_t distance);
+
+void resetBossStage(Combat& combat);
+void activateBoss(Combat& combat);
+void updateBoss(Combat& combat, int16_t playerX, int16_t playerY);
+void getBossSpawnPixel(uint8_t& x, uint8_t& y);
+bool bossOverlapsPlayer(const Boss& boss, int16_t playerCenterX,
+                        int16_t playerCenterY, bool touching = false);
 
 void createScoreOrb(ScoreOrb orbs[MAX_SCORE_ORBS], int16_t x, int16_t y,
                     uint8_t value);

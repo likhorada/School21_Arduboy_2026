@@ -157,6 +157,15 @@ void testTimerAndWaves() {
             assert(alive(game.combat) == 0);
             updateGame(game, idle);
         }
+        if (stage == BOSS_STAGE) {
+            assert(getStageWaveCount(stage) == 0);
+            for (unsigned i = 0; i < SPAWN_DELAY_FRAMES; ++i)
+                updateGame(game, idle);
+            assert(game.combat.boss.hpFifths == BOSS_MAX_HP * 5);
+            for (uint8_t i = 0; i < BOSS_MAX_HP; ++i)
+                damageBossFifths(game.combat, 5);
+            updateGame(game, idle);
+        }
         if (stage + 1 < TOTAL_STAGES) {
             assert(game.state == GameState::StageCleared);
             updateGame(game, pressA);
@@ -805,6 +814,94 @@ const InputFrame input = {int8_t(int(rng % 3) - 1), int8_t(int((rng >> 8) % 3) -
     assert(deaths > 0);
     std::printf("Live combat stress: 20000 frames, %u death/restart flows\n", deaths);
 }
+
+void testBoss() {
+    static_assert(sizeof(Projectile) == 4, "Projectile pool must stay packed");
+    Game game = fixture();
+    game.combat.currentStage = BOSS_STAGE;
+    resetBossStage(game.combat);
+    assert(!game.combat.boss.hpFifths);
+    for (unsigned i = 0; i < SPAWN_DELAY_FRAMES; ++i)
+        updateCombat(game.combat, game.player.x, game.player.y);
+    assert(game.combat.boss.hpFifths == BOSS_MAX_HP * 5);
+    assert(game.combat.spawnTimer == BOSS_AWAKE_FRAMES);
+
+    uint8_t spawnX, spawnY;
+    getBossSpawnPixel(spawnX, spawnY);
+    assert(game.combat.boss.x == spawnX * FIXED_ONE);
+    assert(game.combat.boss.y == spawnY * FIXED_ONE);
+
+    const int16_t startX = game.combat.boss.x;
+    const int16_t startY = game.combat.boss.y;
+    for (uint8_t step = 0; step < BOSS_PATROL_LEG_LEN * 4; ++step) {
+        for (uint8_t frame = 0; frame < BOSS_STEP_INTERVAL_FRAMES; ++frame) {
+            updateBoss(game.combat, game.player.x, game.player.y);
+            const int16_t centerX = game.combat.boss.x / FIXED_ONE;
+            const int16_t centerY = game.combat.boss.y / FIXED_ONE;
+            for (int16_t y = centerY - BOSS_HALF_HEIGHT;
+                 y < centerY + BOSS_HALF_HEIGHT; ++y)
+                for (int16_t x = centerX - BOSS_HALF_WIDTH;
+                     x < centerX + BOSS_HALF_WIDTH; ++x)
+                    assert(!stageWallPixel(BOSS_STAGE, x, y));
+        }
+    }
+    assert(game.combat.boss.phase == 0);
+    assert(game.combat.boss.x == startX && game.combat.boss.y == startY);
+    assert(alive(game.combat) >= 1);
+    for (const Enemy& enemy : game.combat.enemies)
+        if (getEnemyType(enemy) != EnemyType::None)
+            assert(enemyPositionValid(BOSS_STAGE, enemy.x, enemy.y));
+
+    // Пробуждение блокирует прицеливание; затем Recursive Call безопасно
+    // выбирает босса вместо индекса массива врагов.
+    for (Projectile& projectile : game.combat.projectiles) projectile.framesLeft = 0;
+    for (Enemy& enemy : game.combat.enemies) setEnemyType(enemy, EnemyType::None);
+    game.combat.shotCooldown = 0;
+    const uint16_t awakeHp = game.combat.boss.hpFifths;
+    game.combat.projectiles[0] = {142, 64, 0, 4};
+    updateCombat(game.combat, 51 * FIXED_ONE, 29 * FIXED_ONE);
+    assert(game.combat.boss.hpFifths == awakeHp);
+    for (Projectile& projectile : game.combat.projectiles) projectile.framesLeft = 0;
+    game.combat.spawnTimer = 0;
+    game.combat.recursiveTicks = 1;
+    game.combat.shotCooldown = 0;
+    updateCombat(game.combat, 51 * FIXED_ONE, 29 * FIXED_ONE, 0, 0, 3, 0);
+    assert(projectiles(game.combat) == 3);
+    const uint16_t beforeAutoFire = game.combat.boss.hpFifths;
+    game.combat.shotCooldown = 255;
+    for (uint8_t frame = 0; frame < PROJECTILE_LIFETIME &&
+                            game.combat.boss.hpFifths == beforeAutoFire;
+         ++frame)
+        updateCombat(game.combat, 51 * FIXED_ONE, 29 * FIXED_ONE);
+    assert(game.combat.boss.hpFifths < beforeAutoFire);
+
+    // Обычный и двойной снаряды используют те же пятые доли, что улучшения.
+    game.combat.boss.x = 79 * FIXED_ONE;
+    game.combat.boss.y = 32 * FIXED_ONE;
+    game.combat.boss.waveTimer = 100;
+    game.combat.recursiveTicks = 0;
+    game.combat.shotCooldown = 255;
+    for (Projectile& projectile : game.combat.projectiles) projectile.framesLeft = 0;
+    const uint16_t hp = game.combat.boss.hpFifths;
+    game.combat.projectiles[0] = {142, 64, 0, 4};
+    updateCombat(game.combat, 20 * FIXED_ONE, 20 * FIXED_ONE, 2);
+    assert(game.combat.boss.hpFifths == hp - 7);
+    game.combat.projectiles[0] = {142, 64, uint8_t(2 << 5), 4};
+    updateCombat(game.combat, 20 * FIXED_ONE, 20 * FIXED_ONE, 0);
+    assert(game.combat.boss.hpFifths == hp - 17);
+
+    assert(checkPlayerEnemyCollisions(
+        game.combat, game.combat.boss.x - HALF_PLAYER,
+        game.combat.boss.y - HALF_PLAYER));
+
+    game.combat.stageTimer = 126;
+    game.combat.scoreOrbs[0] = {1, 1, 9, 10};
+    damageBossFifths(game.combat, 255);
+    damageBossFifths(game.combat, 255);
+    assert(!game.combat.boss.hpFifths && game.combat.stageCleared);
+    assert(game.combat.playerScore == BOSS_SCORE + 9 + 200);
+    assert(alive(game.combat) == 0 && projectiles(game.combat) == 0);
+}
 } // namespace
 
 int main() {
@@ -815,6 +912,7 @@ int main() {
     testAbilitiesAndCombat();
     testPassiveFireUpgrades();
     testGeometry();
+    testBoss();
     testLiveCombatStress();
     std::puts("Combat regressions passed: waves, timer, shop, health, abilities, pools, 50000 geometry rays.");
 }

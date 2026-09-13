@@ -151,8 +151,7 @@ uint8_t tinyFontIndex(char c) {
 
 // Глиф врага обрезается краем арены, не переносится на другую сторону.
 // На AVR рисуем колонку-байтом в кадровый буфер, на хосте — пикселями.
-void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
-  const uint8_t *data = &tinyFont[tinyFontIndex(c) * 4];
+void drawGlyphAt(Arduboy2 &arduboy, const uint8_t* data, int16_t x, int16_t y) {
 #if defined(__AVR__)
   uint8_t *frame = arduboy.getBuffer();
   for (uint8_t col = 0; col < 4; ++col) {
@@ -170,6 +169,27 @@ void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
     }
   }
 #endif
+}
+
+void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
+  drawGlyphAt(arduboy, &tinyFont[tinyFontIndex(c) * 4], x, y);
+}
+
+const uint8_t bossGrid[] PROGMEM = {0, 1, 2, 3, 255, 4, 5, 1, 6};
+
+void drawBoss(Arduboy2& arduboy, const Boss& boss) {
+  if (!boss.hpFifths) return;
+  const int16_t startX = boss.x / FIXED_ONE - BOSS_VIS_W / 2;
+  const int16_t startY = boss.y / FIXED_ONE - BOSS_VIS_H / 2;
+  for (uint8_t row = 0; row < BOSS_TEXT_COLS; ++row) {
+    for (uint8_t col = 0; col < BOSS_TEXT_COLS; ++col) {
+      const uint8_t glyph = pgm_read_byte(&bossGrid[row * 3 + col]);
+      if (glyph != 255)
+        drawGlyphAt(arduboy, &bossFont[glyph * 4],
+                    startX + col * BOSS_COL_PITCH,
+                    startY + row * BOSS_ROW_PITCH);
+    }
+  }
 }
 
 // Рисуем врага: компактная строка, например "d10", "x2", "F15"
@@ -239,6 +259,24 @@ void drawScoreOrb(Arduboy2 &arduboy, const ScoreOrb &orb) {
 // Рисуем предупреждающие квадраты перед спавном волны
 void drawSpawnIndicators(Arduboy2 &arduboy, const Combat &combat) {
   if (combat.spawnTimer == 0) {
+    return;
+  }
+
+  if (combat.currentStage == BOSS_STAGE) {
+    if (!combat.boss.hpFifths && (combat.spawnTimer & 1)) {
+      uint8_t px, py;
+      getBossSpawnPixel(px, py);
+      const int16_t left = px - BOSS_VIS_W / 2;
+      const int16_t top = py - BOSS_VIS_H / 2;
+      for (uint8_t x = 0; x < BOSS_VIS_W; ++x) {
+        drawArenaPixel(arduboy, left + x, top, WHITE);
+        drawArenaPixel(arduboy, left + x, top + BOSS_VIS_H - 1, WHITE);
+      }
+      for (uint8_t y = 0; y < BOSS_VIS_H; ++y) {
+        drawArenaPixel(arduboy, left, top + y, WHITE);
+        drawArenaPixel(arduboy, left + BOSS_VIS_W - 1, top + y, WHITE);
+      }
+    }
     return;
   }
 
@@ -537,6 +575,16 @@ const uint8_t tinyFont[] PROGMEM = {
     // x (Basic)   d (Splitter)
     0x11, 0x0e, 0x0e, 0x11, 0x1c, 0x07, 0x04, 0x18};
 
+const uint8_t bossFont[] PROGMEM = {
+    0x1f, 0x10, 0x10, 0x10, // L
+    0x0e, 0x11, 0x11, 0x0e, // O
+    0x07, 0x18, 0x18, 0x07, // V
+    0x11, 0x1f, 0x1f, 0x11, // I
+    0x1f, 0x15, 0x15, 0x11, // E
+    0x01, 0x02, 0x1e, 0x01, // Y
+    0x0f, 0x10, 0x10, 0x0f  // U
+};
+
 // Пишет одну колонку спрайта (байт columnBits, бит r = строка r) в плоский
 // кадровый буфер 128×64 по индексу (y/8)*128 + x, бит (y&7). При высоте до 8
 // строк задевает максимум два байта кадра. Столбцы вне экрана и строки ниже 64
@@ -747,6 +795,7 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
       }
     }
     drawStageMap(arduboy, game.combat.currentStage);
+    drawBoss(arduboy, game.combat.boss);
     // Враги
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
       drawEnemy(arduboy, game.combat.enemies[i]);
@@ -787,6 +836,7 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
   drawStageMap(arduboy, game.combat.currentStage);
   // Предупреждающие квадраты перед спавном волны
   drawSpawnIndicators(arduboy, game.combat);
+  drawBoss(arduboy, game.combat.boss);
   // Рисуем новых врагов
   for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
     drawEnemy(arduboy, game.combat.enemies[i]);

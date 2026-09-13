@@ -29,6 +29,9 @@ const uint16_t playerHurtSound[] PROGMEM = {
 
 bool musicPlaying = false;
 
+// USB не используется игрой; DOWN при старте оставляет вход в bootloader.
+ARDUBOY_NO_USB
+
 void updateAudio(uint8_t previousHp) {
     if (!game.soundEnabled) {
         if (tones.playing()) tones.noTone();
