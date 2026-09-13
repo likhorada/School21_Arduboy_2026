@@ -19,11 +19,11 @@ build:
 
 test:
 	mkdir -p "$(BUILD)/tests"
-	$(CXX) -std=c++11 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp tests/gameplay_tests.cpp -o "$(BUILD)/tests/gameplay_tests"
+	$(CXX) -std=c++11 -O2 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/lzss.cpp tests/gameplay_tests.cpp -o "$(BUILD)/tests/gameplay_tests"
 	"$(BUILD)/tests/gameplay_tests"
-	$(CXX) -std=c++11 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp tests/combat_tests.cpp -o "$(BUILD)/tests/combat_tests"
+	$(CXX) -std=c++11 -O2 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/lzss.cpp tests/combat_tests.cpp -o "$(BUILD)/tests/combat_tests"
 	"$(BUILD)/tests/combat_tests"
-	$(CXX) -std=c++14 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -Itests/stubs -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/render.cpp tests/render_tests.cpp -o "$(BUILD)/tests/render_tests"
+	$(CXX) -std=c++14 -O2 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -fno-omit-frame-pointer -Itests/stubs -I$(SKETCH) $(SKETCH)/game.cpp $(SKETCH)/arena.cpp $(SKETCH)/combat.cpp $(SKETCH)/enemies.cpp $(SKETCH)/stages.cpp $(SKETCH)/lzss.cpp $(SKETCH)/render.cpp tests/render_tests.cpp -o "$(BUILD)/tests/render_tests"
 	"$(BUILD)/tests/render_tests"
 
 # Пример загрузки: make upload PORT=/dev/ttyACM0

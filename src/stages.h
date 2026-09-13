@@ -88,13 +88,38 @@ const Wave PROGMEM stage2_waves[] = {
 const Stage PROGMEM stage2 = {3, // 3 волны
                               stage2_waves};
 
+// ====== СТЕЙДЖ 3 ======
+
+// Волна 1: разведка — быстрые по краям, сплиттер в глубине
+const WaveEnemy PROGMEM stage3_wave1[] = {{EnemyType::Fast, 15, 18, 14},
+                                          {EnemyType::Fast, 15, 90, 14},
+                                          {EnemyType::Splitter, 8, 51, 40}};
+
+// Волна 2: двойное давление — спаренные сплиттеры
+const WaveEnemy PROGMEM stage3_wave2[] = {{EnemyType::Splitter, 16, 30, 30},
+                                          {EnemyType::Splitter, 16, 76, 30},
+                                          {EnemyType::Fast, 15, 51, 12}};
+
+// Волна 3: финал игры — все типы
+const WaveEnemy PROGMEM stage3_wave3[] = {{EnemyType::Fast, 15, 12, 10},
+                                          {EnemyType::Fast, 15, 95, 10},
+                                          {EnemyType::Splitter, 24, 40, 40},
+                                          {EnemyType::Splitter, 24, 70, 40},
+                                          {EnemyType::Basic, 3, 51, 55}};
+
+// Массив волн для стейджа 3
+const Wave PROGMEM stage3_waves[] = {
+    {3, stage3_wave1}, {3, stage3_wave2}, {5, stage3_wave3}};
+
+// Определение стейджа 3
+const Stage PROGMEM stage3 = {3, // 3 волны
+                              stage3_waves};
+
 // Массив всех стейджей
 const Stage *const PROGMEM allStages[] = {
-    &stage1, &stage2
-    // Здесь можно добавить stage3 и т.д.
-};
+    &stage1, &stage2, &stage3};
 
-constexpr uint8_t TOTAL_STAGES = 2;
+constexpr uint8_t TOTAL_STAGES = 3;
 
 // Функции для работы со стейджами
 uint8_t getStageWaveCount(uint8_t stageIndex);

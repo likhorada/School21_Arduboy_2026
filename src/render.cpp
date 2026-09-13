@@ -1,12 +1,14 @@
+#include <Arduboy2.h>
+
 #include "render.h"
 
 #include "arena.h"
-#include "assets/intro.h"
-#include "assets/mainmenu_sound.h"
-#include "assets/menu_frames.h"
-#include "assets/soundmenu_off.h"
+
+#include "assets/menu_screens.h"
+#include "assets/stage_layouts.h"
+#include "lzss.h"
+
 #include "stages.h"
-#include <Arduboy2.h>
 
 namespace gc {
 namespace {
@@ -35,6 +37,13 @@ const uint8_t scoreCoinBitmap[] PROGMEM = {
     0b01110, 0b10111, 0b10111, 0b11111, 0b01110,
 };
 
+// Спрайт игрока 7×7 пикселей для байтовой ветки рендера (renderPlayerFrame),
+// хранится во flash (PROGMEM).
+const uint8_t playerBitmap[] PROGMEM = {0x3e, 0x7f, 0x55, 0x5d,
+                                        0x55, 0x7f, 0x3e};
+static_assert(sizeof(playerBitmap) == PLAYER_SIZE && PLAYER_SIZE == 7,
+              "Update the player bitmap when changing the hitbox");
+
 // Кадры игрока: холст 9x7, колонно-мажорно (байт на колонку, бит = строка).
 #include "assets/player_frames.h"
 
@@ -55,21 +64,53 @@ void drawArenaPixel(Arduboy2 &arduboy, int16_t x, int16_t y, uint8_t color) {
                     HUD_HEIGHT + wrapCoordinate(y, ARENA_HEIGHT), color);
 }
 
-// Применяем XOR-дельту кадра к буферу поверх уже отрисованного base.
-// Дельты во flash: runs [off_lo, off_hi, len, payload...], конец 0xFF 0xFF.
-void applyScreenDelta(uint8_t *buf, const uint8_t *delta) {
-  uint16_t offset =
-      pgm_read_byte(delta) | (uint16_t(pgm_read_byte(delta + 1)) << 8);
-  delta += 2;
-  while (offset != 0xFFFF) {
-    const uint8_t length = pgm_read_byte(delta++);
-    for (uint8_t k = 0; k < length; ++k) {
-      buf[offset + k] ^= pgm_read_byte(delta + k);
-    }
-    delta += length;
-    offset = pgm_read_byte(delta) | (uint16_t(pgm_read_byte(delta + 1)) << 8);
-    delta += 2;
+// Декодируем и рисуем экран меню. На AVR пишем прямо в кадровый буфер (окно
+// LZSS); на хосте декодируем во временный буфер и рисуем как bitmap-маску.
+void drawMenuScreen(Arduboy2 &arduboy, uint8_t screenCount) {
+#if defined(__AVR__)
+  lzssDecodeScreens(screenCount, arduboy.getBuffer(), menu_screens);
+#else
+  uint8_t frame[MENU_SCREEN_BYTES] = {};
+  lzssDecodeScreens(screenCount, frame, menu_screens);
+  arduboy.drawBitmap(0, 0, frame, 128, 64, WHITE);
+#endif
+}
+
+// Рисуем белую разметку стен стейджа поверх арены (влево от колонки UI).
+// Стейдж 1 — пустое поле. Маски — page-column битовые карты: на AVR копируем
+// байты прямо в кадровый буфер (страница*128+колонка), на хосте — попиксельно.
+void drawStageMap(Arduboy2 &arduboy, uint8_t stage) {
+  const uint8_t *map;
+  switch (stage) {
+  case 1:
+    map = stage2_map;
+    break;
+  case 2:
+    map = stage3_map;
+    break;
+  default:
+    return;
   }
+#if defined(__AVR__)
+  uint8_t *frame = arduboy.getBuffer();
+  for (uint8_t page = 0; page < ARENA_HEIGHT / 8; ++page) {
+    for (uint8_t x = 0; x < ARENA_WIDTH; ++x) {
+      const uint8_t column = pgm_read_byte(&map[page * ARENA_WIDTH + x]);
+      if (column) {
+        frame[page * 128 + x] |= column;
+      }
+    }
+  }
+#else
+  for (uint8_t y = 0; y < ARENA_HEIGHT; ++y) {
+    for (uint8_t x = 0; x < ARENA_WIDTH; ++x) {
+      const uint8_t byte = pgm_read_byte(&map[(y >> 3) * ARENA_WIDTH + x]);
+      if (byte & (1u << (y & 7))) {
+        arduboy.drawPixel(x, HUD_HEIGHT + y, WHITE);
+      }
+    }
+  }
+#endif
 }
 
 // Хитбокс игрока остаётся PLAYER_SIZE, визуальный холст 9x7 центрируем по
@@ -114,45 +155,8 @@ void drawProjectile(Arduboy2 &arduboy, const Projectile &projectile) {
   }
 }
 
-// Маленький пиксельный шрифт 4×5 для миниатюрных врагов.
-// Глифы: 0–9, A–F, 'x' (Basic), 'd' (Splitter). Итого 18 штук, по 5 байт.
-// Каждый байт — одна строка, биты 3..0 слева направо (маска 0x8..0x1).
-const uint8_t tinyFont[] PROGMEM = {// 0
-                                    0b0110, 0b1001, 0b1001, 0b1001, 0b0110,
-                                    // 1
-                                    0b0010, 0b0110, 0b0010, 0b0010, 0b0111,
-                                    // 2
-                                    0b1110, 0b0001, 0b0110, 0b1000, 0b1111,
-                                    // 3
-                                    0b1110, 0b0001, 0b0110, 0b0001, 0b1110,
-                                    // 4
-                                    0b1001, 0b1001, 0b1111, 0b0001, 0b0001,
-                                    // 5
-                                    0b1111, 0b1000, 0b1110, 0b0001, 0b1110,
-                                    // 6
-                                    0b0110, 0b1000, 0b1110, 0b1001, 0b0110,
-                                    // 7
-                                    0b1111, 0b0001, 0b0010, 0b0100, 0b0100,
-                                    // 8
-                                    0b0110, 0b1001, 0b0110, 0b1001, 0b0110,
-                                    // 9
-                                    0b0110, 0b1001, 0b0111, 0b0001, 0b0110,
-                                    // A
-                                    0b0110, 0b1001, 0b1111, 0b1001, 0b1001,
-                                    // B
-                                    0b1110, 0b1001, 0b1110, 0b1001, 0b1110,
-                                    // C
-                                    0b0111, 0b1000, 0b1000, 0b1000, 0b0111,
-                                    // D
-                                    0b1110, 0b1001, 0b1001, 0b1001, 0b1110,
-                                    // E
-                                    0b1111, 0b1000, 0b1110, 0b1000, 0b1111,
-                                    // F
-                                    0b1111, 0b1000, 0b1110, 0b1000, 0b1000,
-                                    // x (Basic)
-                                    0b1001, 0b0110, 0b0110, 0b0110, 0b1001,
-                                    // d (Splitter)
-                                    0b0100, 0b0100, 0b1110, 0b1001, 0b1001};
+// Маленький пиксельный шрифт 4×5 для миниатюрных врагов живёт в gc (не в
+// анонимном пространстве), чтобы тесты могли сверять перенос данных с эталоном.
 
 // Индекс в tinyFont: '0'-'9' → 0-9, 'A'-'F' → 10-15, 'x' → 16, 'd' → 17
 uint8_t tinyFontIndex(char c) {
@@ -166,17 +170,26 @@ uint8_t tinyFontIndex(char c) {
 }
 
 // Глиф врага обрезается краем арены, не переносится на другую сторону.
+// На AVR рисуем колонку-байтом в кадровый буфер, на хосте — пикселями.
 void drawTinyGlyph(Arduboy2 &arduboy, char c, int16_t x, int16_t y) {
-  const uint8_t *data = &tinyFont[tinyFontIndex(c) * 5];
+  const uint8_t *data = &tinyFont[tinyFontIndex(c) * 4];
+#if defined(__AVR__)
+  uint8_t *frame = arduboy.getBuffer();
+  for (uint8_t col = 0; col < 4; ++col) {
+    if (x + col >= 0 && x + col < ARENA_WIDTH) {
+      fillFrameColumn(frame, x + col, y, pgm_read_byte(data + col), 5);
+    }
+  }
+#else
   for (uint8_t row = 0; row < 5; ++row) {
-    const uint8_t bits = pgm_read_byte(data + row);
     for (uint8_t col = 0; col < 4; ++col) {
-      if ((bits & (0x08 >> col)) && x + col >= 0 && x + col < ARENA_WIDTH &&
-          y + row >= 0 && y + row < ARENA_HEIGHT) {
+      if ((pgm_read_byte(data + col) & (1 << row)) && x + col >= 0 &&
+          x + col < ARENA_WIDTH && y + row >= 0 && y + row < ARENA_HEIGHT) {
         arduboy.drawPixel(x + col, HUD_HEIGHT + y + row, WHITE);
       }
     }
   }
+#endif
 }
 
 // Рисуем врага: компактная строка, например "d10", "x2", "F15"
@@ -474,52 +487,127 @@ void drawUIColumn(Arduboy2 &arduboy, const Game &game) {
 
 } // namespace
 
+// Маленький пиксельный шрифт 4×5 для миниатюрных врагов.
+// Глифы: 0–9, A–F, 'x' (Basic), 'd' (Splitter). Итого 18 штук.
+// Хранится по колонкам: каждый байт — одна колонка, бит r = строка r (бит 0 —
+// верхняя строка). Такая ориентация совпадает с кадровым буфером Arduboy
+// (колонка = байт, бит = строка страницы), что позволяет рисовать глиф
+// байт-за-байтом, а не пиксель-за-пикселем. Определение вне анонимного
+// пространства: тесты сверяют перенос данных с построчным эталоном.
+const uint8_t tinyFont[] PROGMEM = {
+    // 0  1  2  3  4  5  6  7
+    0x0e, 0x11, 0x11, 0x0e, 0x00, 0x12, 0x1f, 0x10,
+    0x19, 0x15, 0x15, 0x12, 0x11, 0x15, 0x15, 0x0a,
+    0x07, 0x04, 0x04, 0x1f, 0x17, 0x15, 0x15, 0x09,
+    0x0e, 0x15, 0x15, 0x08, 0x01, 0x19, 0x05, 0x03,
+    0x0a, 0x15, 0x15, 0x0a, 0x02, 0x15, 0x15, 0x0e,
+    // 8  9  A  B  C  D  E  F
+    0x1e, 0x05, 0x05, 0x1e, 0x1f, 0x15, 0x15, 0x0a,
+    0x0e, 0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x0e,
+    0x1f, 0x15, 0x15, 0x11, 0x1f, 0x05, 0x05, 0x01,
+    // x (Basic)   d (Splitter)
+    0x11, 0x0e, 0x0e, 0x11, 0x1c, 0x07, 0x04, 0x18};
+
+// Пишет одну колонку спрайта (байт columnBits, бит r = строка r) в плоский
+// кадровый буфер 128×64 по индексу (y/8)*128 + x, бит (y&7). При высоте до 8
+// строк задевает максимум два байта кадра. Столбцы вне экрана и строки ниже 64
+// обрезаются; бит = 1 только ставит пиксель (буфер за кадр уже очищен).
+void fillFrameColumn(uint8_t *frame, int16_t x, int16_t y, uint8_t columnBits,
+                     uint8_t height) {
+  if (x < 0 || x >= 128 || y >= 64 || height == 0 || columnBits == 0) {
+    return;
+  }
+  columnBits &= static_cast<uint8_t>((1u << height) - 1);
+  if (columnBits == 0) {
+    return;
+  }
+  if (y < 0) {
+    const int drop = -y;
+    if (drop >= height) {
+      return;
+    }
+    columnBits >>= drop;
+    height = static_cast<uint8_t>(height - drop);
+    y = 0;
+  }
+  if (y + height > 64) {
+    height = static_cast<uint8_t>(64 - y);
+    columnBits &= static_cast<uint8_t>((1u << height) - 1);
+  }
+  const uint8_t shift = y & 7;
+  const uint8_t inFirst = 8 - shift;
+  uint8_t *byte0 = frame + (y >> 3) * 128 + x;
+  if (height <= inFirst) {
+    byte0[0] |= static_cast<uint8_t>(columnBits << shift);
+  } else {
+    byte0[0] |= static_cast<uint8_t>(columnBits << shift);
+    const uint8_t hi = static_cast<uint8_t>(columnBits >> inFirst) &
+                       static_cast<uint8_t>((1u << (height - inFirst)) - 1);
+    if (hi) {
+      byte0[128] |= hi;
+    }
+  }
+}
+
+// Рисует спрайт игрока 7×7 в плоский кадровый буфер колонка-за-байтом.
+// Колонки и строки переносятся через края арены как в pixel-версии. Глаз (тёмная
+// точка) очищается по направлению взгляда; при Dash весь силуэт белый.
+void renderPlayerFrame(uint8_t *frame, const Player &player) {
+  const int16_t x = player.x / FIXED_ONE;
+  const int16_t y = player.y / FIXED_ONE;
+  const uint8_t eyeColumn = static_cast<uint8_t>(3 + getFacingX(player) * 2);
+  const uint8_t eyeRow = static_cast<uint8_t>(3 + getFacingY(player) * 2);
+  const bool dashing = player.dashFrames > 0;
+  for (uint8_t column = 0; column < PLAYER_SIZE; ++column) {
+    uint8_t base =
+        dashing ? 0x7F : static_cast<uint8_t>(pgm_read_byte(&playerBitmap[column]));
+    if (column == eyeColumn) {
+      base &= static_cast<uint8_t>(~(1u << eyeRow));
+    }
+    if (base == 0) {
+      continue;
+    }
+    const int16_t screenX = wrapCoordinate(x + column, ARENA_WIDTH);
+    const uint8_t shift = y & 7;
+    const uint8_t first = 8 - shift;
+    const uint8_t page0 = static_cast<uint8_t>(y >> 3);
+    const uint8_t lo = base & static_cast<uint8_t>((1u << first) - 1);
+    // Строки r < first остаются в своей странице; остальные либо в следующей,
+    // либо (y+7 >= 64) переносятся на верх арены — страница 0 с тем же битом.
+    if (y <= static_cast<int16_t>(ARENA_HEIGHT - PLAYER_SIZE)) {
+      frame[page0 * 128 + screenX] |= static_cast<uint8_t>(lo << shift);
+      const uint8_t hi = static_cast<uint8_t>(base >> first);
+      if (hi) {
+        frame[(page0 + 1) * 128 + screenX] |= hi;
+      }
+    } else {
+      frame[page0 * 128 + screenX] |= static_cast<uint8_t>(lo << shift);
+      const uint8_t hi = static_cast<uint8_t>(base >> first);
+      if (hi) {
+        frame[screenX] |= hi;
+      }
+    }
+  }
+}
+
 // Отрисовка всего игрового экрана.
 void renderGame(Arduboy2 &arduboy, const Game &game) {
   arduboy.clear();
   arduboy.setTextWrap(false);
   if (game.state == GameState::Intro) {
-    arduboy.drawBitmap(0, 0, intro_bitmap, 128, 64, WHITE);
+    drawMenuScreen(arduboy, 1);
     return;
   }
 
   if (game.state == GameState::Menu) {
-    // База кадра — mainmenu_sound, остальные кадры — XOR-дельты поверх неё.
-    arduboy.drawBitmap(0, 0, mainmenu_sound_bitmap, 128, 64, WHITE);
-    const uint8_t *delta = nullptr;
-    switch (game.menu.selectedIndex) {
-    case 0:
-      delta = menu_delta_play;
-      break;
-    case 1:
-      delta = menu_delta_about;
-      break;
-    case 3:
-      delta = menu_delta_main_exit;
-      break;
-    default:
-      break; // Sound — сама база
-    }
-    if (delta)
-      applyScreenDelta(arduboy.sBuffer, delta);
+    // screens: play, about, sound, exit -> indexes 1..4 -> decode 2..5.
+    drawMenuScreen(arduboy, 2 + game.menu.selectedIndex);
     return;
   }
 
   if (game.state == GameState::SoundMenu) {
-    arduboy.drawBitmap(0, 0, soundmenu_off_bitmap, 128, 64, WHITE);
-    const uint8_t *delta = nullptr;
-    switch (game.soundMenu.selectedIndex) {
-    case 0:
-      delta = menu_delta_soundmenu_on;
-      break;
-    case 2:
-      delta = menu_delta_soundmenu_exit;
-      break;
-    default:
-      break; // Off — сама база
-    }
-    if (delta)
-      applyScreenDelta(arduboy.sBuffer, delta);
+    // screens: on, off, exit -> indexes 5..7 -> decode 6..8.
+    drawMenuScreen(arduboy, 6 + game.soundMenu.selectedIndex);
     return;
   }
 
@@ -615,23 +703,16 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
 
   if (game.state == GameState::Paused) {
     // Рисуем игровой мир позади (без обновления), затем накладываем надпись
-    // PAUSED Сначала рисуем арену как в обычном режиме
-    for (uint8_t y = 4; y < ARENA_HEIGHT; y += 12) {
-      for (uint8_t x = 4; x < ARENA_WIDTH; x += 12) {
-        arduboy.drawPixel(x, y + HUD_HEIGHT);
+    // PAUSED Сначала рисуем арену как в обычном режиме. Фоновая сетка точек
+    // нужна только на пустом первом стейдже; на 2 и 3 ориентацию дают стены.
+    if (game.combat.currentStage == 0) {
+      for (uint8_t y = 4; y < ARENA_HEIGHT; y += 12) {
+        for (uint8_t x = 4; x < ARENA_WIDTH; x += 12) {
+          arduboy.drawPixel(x, y + HUD_HEIGHT);
+        }
       }
     }
-    const uint8_t obstacleCount =
-        getStageObstacleCount(game.combat.currentStage);
-    for (uint8_t i = 0; i < obstacleCount; ++i) {
-      const Obstacle obstacle = readObstacle(game.combat.currentStage, i);
-      arduboy.fillRect(obstacle.x, obstacle.y + HUD_HEIGHT, obstacle.width,
-                       obstacle.height, BLACK);
-      arduboy.drawRect(obstacle.x, obstacle.y + HUD_HEIGHT, obstacle.width,
-                       obstacle.height);
-      arduboy.drawFastHLine(obstacle.x + 2, obstacle.y + HUD_HEIGHT + 2,
-                            obstacle.width - 4);
-    }
+    drawStageMap(arduboy, game.combat.currentStage);
     // Враги
     for (uint8_t i = 0; i < MAX_ENEMIES; ++i) {
       drawEnemy(arduboy, game.combat.enemies[i]);
@@ -658,23 +739,17 @@ void renderGame(Arduboy2 &arduboy, const Game &game) {
     return;
   }
 
-  // Фоновая сетка для ориентации на арене
-  for (uint8_t y = 4; y < ARENA_HEIGHT; y += 12) {
-    for (uint8_t x = 4; x < ARENA_WIDTH; x += 12) {
-      arduboy.drawPixel(x, y + HUD_HEIGHT);
+  // Фоновая сетка для ориентации только на пустом первом стейдже; на 2 и 3
+  // ориентацию дают сами стены.
+  if (game.combat.currentStage == 0) {
+    for (uint8_t y = 4; y < ARENA_HEIGHT; y += 12) {
+      for (uint8_t x = 4; x < ARENA_WIDTH; x += 12) {
+        arduboy.drawPixel(x, y + HUD_HEIGHT);
+      }
     }
   }
-  // Препятствия (тёмные прямоугольники с обводкой), зависят от стейджа
-  const uint8_t obstacleCount = getStageObstacleCount(game.combat.currentStage);
-  for (uint8_t i = 0; i < obstacleCount; ++i) {
-    const Obstacle obstacle = readObstacle(game.combat.currentStage, i);
-    arduboy.fillRect(obstacle.x, obstacle.y + HUD_HEIGHT, obstacle.width,
-                     obstacle.height, BLACK);
-    arduboy.drawRect(obstacle.x, obstacle.y + HUD_HEIGHT, obstacle.width,
-                     obstacle.height);
-    arduboy.drawFastHLine(obstacle.x + 2, obstacle.y + HUD_HEIGHT + 2,
-                          obstacle.width - 4);
-  }
+  // Стены стейджа (попиксельные маски из assets), сдвинутые под HUD
+  drawStageMap(arduboy, game.combat.currentStage);
   // Предупреждающие квадраты перед спавном волны
   drawSpawnIndicators(arduboy, game.combat);
   // Рисуем новых врагов

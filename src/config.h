@@ -5,7 +5,7 @@
 namespace gc {
 
 constexpr uint8_t HUD_HEIGHT = 0;
-constexpr uint8_t ARENA_WIDTH = 104;
+constexpr uint8_t ARENA_WIDTH = 103;
 constexpr uint8_t ARENA_HEIGHT = 64 - HUD_HEIGHT;
 // Позиции игрока и пуль храним в 1/16 пикселя: 24 единицы означают 1,5 пикселя.
 constexpr uint8_t FIXED_ONE = 16;
@@ -15,8 +15,8 @@ constexpr int16_t ARENA_HEIGHT_FIXED = ARENA_HEIGHT * FIXED_ONE;
 constexpr uint8_t FRAME_DURATION_MS =
     16; // 62,5 кадра/с, если укладываемся в бюджет.
 constexpr uint8_t PLAYER_SIZE = 7;
-constexpr uint8_t PLAYER_START_X = 60;
-constexpr uint8_t PLAYER_START_Y = 25;
+constexpr uint8_t PLAYER_START_X = 45;
+constexpr uint8_t PLAYER_START_Y = 30;
 // Скорости в единицах 1/16 пикселя за кадр; таймеры считают кадры.
 constexpr uint8_t WALK_SPEED = 16;
 constexpr uint8_t DASH_SPEED = 64;
